@@ -27,6 +27,16 @@ The SDK submodule remains at the repository's pinned revision. A board-specific 
 
 The build produces separate main code and built-in font images under `main.bin/`, plus bootloader, Flash table and the E0470A03 waveform image. Do not use the old small diagnostic image addresses without accounting for the font/resource image.
 
+| Image | NOR address | Partition capacity |
+|---|---|---|
+| `ftab.bin` | `0x12000000` | 32KiB |
+| `bootloader.bin` | `0x12010000` | 64KiB |
+| `ER_IROM1.bin` | `0x12200000` | 2MiB |
+| `ER_IROM2.bin` | `0x12400000` | 10MiB |
+| `epd_waveform.bin` | `0x12EC0000` | 256KiB |
+
+Before first installation, read and verify the complete 16MiB NOR, not only the application partition. Keep that backup private and separate from the public source and flash bundle. The TF card is not formatted by this BSP. This image layout differs from the original application and standalone diagnostic firmware.
+
 `package_527.py` checks the board and image sizes, then copies all five images with a self-contained sftool configuration and SHA-256 manifest into a new output directory. It does not access the serial port or flash the board. The CI artifact includes this bundle under `flash_bundle/`.
 
 ## Driver integration
@@ -35,8 +45,10 @@ The build produces separate main code and built-in font images under `main.bin/`
 - Ordinary gray updates (including antialiased text) use GL16; strictly black/white transitions can use DU. GC16 cleaning follows the UI's 5/10/20/every-update setting, with 10 as default. INIT is only used at startup or after loss of panel state. Identical framebuffers are skipped. The legacy parser's intermediate white-page flush and transient loading-hourglass updates are suppressed; a page turn submits the completed page once.
 - VCOM defaults to the board-tested -1.10V and temperature to 28°C; these are not per-panel factory calibration. SY7636 shutdown retains the 150ms rail sequence and at least 450ms with EN low before re-enabling. The latter is a deadline checked on the next enable, allowing touch handling and preparation of the next page during discharge.
 - Touch exposes the reader's `touch` device interface with validated packet decoding, IRQ-driven reads and primary-contact tracking. Raw portrait coordinates match the 684×1216 UI after the existing rotation mapping. Touching a UI control is dispatched once on release.
+- Both settings and the reading overlay retain touch operation on this board. The overlay's left/right arrows change the cleaning interval; it does not offer a touch-off setting without a verified physical way to turn touch back on.
 - LM3630A retains the tested low-level current/boost configuration and per-bank brightness cap. Only the initial ≤5% ramp can classify a one-shot OCP/OVP event as startup history; two follow-up reads must be clear. Runtime faults still shut down both enables.
 - TF is mounted at `/`, matching this repository's `/fonts` and `/settings.cfg` paths. Application writes are enabled for settings and reader data; there is no automatic format. The SPI MSD source snapshot has read CRC16, bounds and transfer-length checks.
+- Font/size/weight/spacing/margin settings are saved to `/settings.cfg`. Short writes, synchronization and close failures are checked; a failed save leaves the settings page open with an error. Saving is not a power-loss-atomic transaction.
 - The library uses `/books` when that directory exists, otherwise `/`. Home, settings and cold/warm frontlight controls use the 684×1216 portrait dimensions. Touch hit regions account for renderer margins.
 - Display refresh serializes touch, frontlight checks and diagnostic TF operations. Hardware protection remains enabled. Input during a full refresh can be delayed or coalesced.
 
@@ -44,6 +56,10 @@ Battery/charger routing, physical keys and deep-sleep wake routing have not been
 
 ## Validation status
 
-2026-10-19: board integration compiles with the pinned SDK, including LCPU and Bluetooth/PAN. Reader/UI hardware validation is in progress. See the final validation record added alongside the completed integration; standalone diagnostic results alone are not evidence that every reader function works.
+See [hardware and build validation](VALIDATION_SF32LB527.md) for measured results and limits.
 
 `python tools/test_527_cache.py` requires a host GCC. It replays the actual C cache routines against GC16, DU, INIT and GL16 at the configured temperature, compares every packed output byte, checks bounded overflow, and verifies the cleaning-interval policy. Hardware optical checks remain necessary for ghosting and gray quality.
+
+`python tools/test_settings_save.py` uses host G++ to exercise the actual writer with short writes and open/write/sync/close failures. Both checks run for the new board in CI.
+
+The touch packet implementation follows the [FocalTech FT5x06 driver protocol](https://github.com/focaltech-systems/drivers-input-touchscreen-FTS_driver/blob/master/ft5x06.c): a three-byte header followed by six-byte contact records. The detected `0x54` family ID does not distinguish all FT5x46 suffixes. The SPI MSD snapshot retains its RT-Thread copyright/license header; `src/boards/sf32lb527/upstream.json` records the source-file hashes before the board-specific changes.

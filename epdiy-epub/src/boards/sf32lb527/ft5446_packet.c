@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
  * FT5x46 protocol: 3 header bytes, then five 6-byte contact records.
- * Original implementation; protocol references are recorded in README.md.
+ * Original implementation; protocol references are recorded in BOARD_SF32LB527.md.
  */
 #include "ft5446_packet.h"
 #include <string.h>

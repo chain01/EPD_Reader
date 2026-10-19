@@ -119,12 +119,12 @@ static void utf8_truncate(char *dst, const char *src, int max_bytes)
  * 持久化
  *========================================================================*/
 
-void reading_settings_save(void)
+bool reading_settings_save(void)
 {
     int fd = open(SETTINGS_FILE_PATH, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0) {
         rt_kprintf("[settings] Cannot save to %s\n", SETTINGS_FILE_PATH);
-        return;
+        return false;
     }
 
     char buf[256];
@@ -140,8 +140,19 @@ void reading_settings_save(void)
                        LINE_SPACINGS[g_line_spacing_idx],
                        MARGINS[g_margin_idx]);
 
-    write(fd, buf, len);
-    close(fd);
+    bool ok=len>0&&len<(int)sizeof(buf);
+    int written=0;
+    while(ok&&written<len) {
+        int n=write(fd,buf+written,len-written);
+        if(n<=0)ok=false;
+        else written+=n;
+    }
+    if(ok&&fsync(fd)<0)ok=false;
+    if(close(fd)<0)ok=false;
+    if(!ok) {
+        rt_kprintf("[settings] Save failed: %s (%d/%d bytes)\n",SETTINGS_FILE_PATH,written,len);
+        return false;
+    }
 
     rt_kprintf("[settings] Saved: font=%s size=%d bold=%d spacing=%d margin=%d\n",
                font_manager_get_name(g_font_type_idx),
@@ -149,6 +160,7 @@ void reading_settings_save(void)
                BOLD_LEVELS[g_bold_idx],
                LINE_SPACINGS[g_line_spacing_idx],
                MARGINS[g_margin_idx]);
+    return true;
 }
 
 void reading_settings_load(Renderer *renderer)
@@ -187,6 +199,7 @@ void reading_settings_load(Renderer *renderer)
     }
 
     if (!file_loaded) {
+        g_font_size_idx=find_index(FONT_SIZES,FONT_SIZES_COUNT,epd_font_ft_get_size(),2);
         rt_kprintf("[settings] No config file, using defaults\n");
         return;
     }
@@ -417,7 +430,13 @@ bool reading_settings_handle_action(Renderer *renderer, UIAction action)
         case SETTING_SAVE_EXIT:
             if (g_settings_changed) {
                 reading_settings_apply(renderer);
-                reading_settings_save();
+                if(!reading_settings_save()) {
+                    reading_settings_draw(renderer);
+                    renderer->draw_text(30,renderer->get_page_height()-renderer->get_line_height(),
+                                        "保存失败，请检查 TF 卡");
+                    renderer->flush_display();
+                    return true;
+                }
                 g_settings_changed = false;
                 g_font_changed = false;
             }

@@ -36,6 +36,12 @@ jobs:
       run: |
         cd SiFli-SDK
         ./install.sh
+
+    - name: Check SF32LB527 cache and settings writer
+      if: matrix.target == 'sf32lb527-oed-e0470a03'
+      run: |
+        python3 tools/test_527_cache.py
+        python3 tools/test_settings_save.py
         
     - name: Build ${{ matrix.target }}
       run: |

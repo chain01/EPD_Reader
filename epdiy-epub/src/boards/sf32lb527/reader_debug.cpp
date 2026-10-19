@@ -1,6 +1,7 @@
 #include "reader_ui.h"
 #include "UIRegionsManager.h"
 #include "type.h"
+#include "reading_settings.h"
 #include <cstring>
 extern "C" {
 #include <finsh.h>
@@ -34,7 +35,7 @@ bool reader527_debug_message(uint32_t msg,Renderer *r)
     else if(msg==DEBUG_LIBRARY)ui_state=SELECTING_EPUB;
     else if(msg==DEBUG_SETTINGS)ui_state=SETTINGS_PAGE;
     else if(msg==DEBUG_LIGHT)ui_state=FRONTLIGHT_PAGE;
-    else if(msg==DEBUG_READING)ui_state=READING_SETTINGS;
+    else if(msg==DEBUG_READING){ui_state=READING_SETTINGS;reading_settings_draw(r);}
     handleUserInteraction(r,NONE,true);r->flush_display();
     rt_kprintf("UI_DEBUG_DONE state=%u\n",(unsigned)ui_state);return true;
 }

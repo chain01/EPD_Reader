@@ -18,7 +18,7 @@ bool reading_settings_handle_action(Renderer *renderer, UIAction action);
 void reading_settings_apply(Renderer *renderer);
 
 /* 持久化：保存当前设置到 TF 卡 */
-void reading_settings_save(void);
+bool reading_settings_save(void);
 
 /* 持久化：从 TF 卡加载设置并应用（启动时调用，含 fallback） */
 void reading_settings_load(Renderer *renderer);

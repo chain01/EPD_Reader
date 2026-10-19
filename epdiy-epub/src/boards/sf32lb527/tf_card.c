@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
  * COM34/COM36 original: SPI1 PA24/25/28/29, AW9523B GE0 detect.
- * No automatic formatting. Data writes are locked except the finite test.
+ * No automatic formatting. Reader settings and filesystem writes are enabled.
  */
 #include <rtthread.h>
 #include <rtdevice.h>

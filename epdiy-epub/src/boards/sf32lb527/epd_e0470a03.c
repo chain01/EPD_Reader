@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
  * SF32LB527 / OED v1.2 / E0470A03-AF-S. DBI shifts data; GPIO scans gates.
- * Boot leaves panel HV off. No filesystem, radio, or Flash write test.
+ * Updates track old/new gray levels and leave panel HV off after scanning.
  */
 #include <rtthread.h>
 #include <rtdevice.h>
@@ -15,7 +15,6 @@
 #include "epd_waveform_bin_reader.h"
 #define WAVE_BYTES 223240u
 #define WAVE_FNV 0x1a2e9bf7u
-#include "patterns.h"
 #include "board527.h"
 #include "frontlight.h"
 #include "tf_card.h"
@@ -63,7 +62,6 @@ static void *extra_allocation;
 static uint8_t *extra_cache;
 static unsigned extra_bytes;
 static uint8_t *raw_row(unsigned row);
-static int vcom_mv = 1100;
 static int lcd_ready;
 static unsigned draws, frames_total, errors, last_frames;
 static uint32_t last_ms;
@@ -73,9 +71,7 @@ static unsigned pipeline=1;
 ALIGN(32) static uint8_t neutral_row[ROW_BYTES];
 static uint16_t row_map[H], unique_y[H];
 static uint32_t row_hash[H];
-static const uint8_t *scan_source;
-static int use_cache=1;
-static uint32_t last_convert_us,last_scan_us;
+static uint32_t last_scan_us;
 
 L1_RET_CODE_SECT(epd527, static void pin(unsigned n, unsigned v))
 {

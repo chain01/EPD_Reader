@@ -169,6 +169,10 @@ void handleEpub(Renderer *renderer, UIAction action)
             }
             if (sel == 0 || touch_sel == 0)
             {
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+                screen_cycle_full_refresh_period(false);
+                set_part_disp_times(screen_get_full_refresh_period());
+#else
                 if(reader->overlay_is_center_touch())
                 {
                     reader->overlay_set_center_mode_full_refresh();
@@ -177,9 +181,14 @@ void handleEpub(Renderer *renderer, UIAction action)
                 {
                     reader->overlay_set_center_mode_touch();
                 }
+#endif
             }
             else if (sel == 2 || touch_sel == 2)
             {
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+                screen_cycle_full_refresh_period(true);
+                set_part_disp_times(screen_get_full_refresh_period());
+#else
                 if(reader->overlay_is_center_touch())
                 {
                     reader->overlay_set_center_mode_full_refresh();
@@ -188,6 +197,7 @@ void handleEpub(Renderer *renderer, UIAction action)
                 {
                     reader->overlay_set_center_mode_touch();
                 }
+#endif
             }
             else if (sel == 1 || touch_sel == 1)
             {
