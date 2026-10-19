@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "rtconfig.h"
-#if !defined(CFG_BOOTLOADER) && !defined(SOC_BF0_LCPU)
+#if !defined(CFG_BOOTLOADER) && !defined(SOC_BF0_LCPU) && !defined(READER527_RECOVERY)
 extern void board527_touch_power(int on);
 extern int board_touch_reset(int high);
 extern void board527_display_off(void);

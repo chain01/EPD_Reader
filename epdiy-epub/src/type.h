@@ -11,7 +11,8 @@ typedef enum {
   SET_READING_SETTINGS = 4,  // 阅读设置（字体/字号/行距/边距）
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
   SET_FRONTLIGHT = 5,
-  SET_CONFIRM = 6
+  SET_USB_DFU = 6,
+  SET_CONFIRM = 7
 #else
   SET_CONFIRM = 5
 #endif
@@ -30,6 +31,7 @@ typedef enum {
   LOW_POWER_PAGE,      // 低电量页面
   CHARGING_PAGE,       // 充电页面
   SHUTDOWN_PAGE,       // 关机页面
-  FRONTLIGHT_PAGE
+  FRONTLIGHT_PAGE,
+  USB_DFU_PAGE
 } AppUIState;
 #endif

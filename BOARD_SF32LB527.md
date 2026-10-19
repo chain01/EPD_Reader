@@ -21,23 +21,27 @@ This BSP is separate from `sf32-oed-epd_v12`: the actual board has SY7636, AW952
 git submodule update --init --recursive
 .\build-sf32lb527.ps1
 python tools/package_527.py --output firmware-527
+# First installation only, with a full backup and debug access:
+python tools/package_527.py --factory --output factory-527
 ```
 
 The SDK submodule remains at the repository's pinned revision. A board-specific project profile overrides the reference-board pin/peripheral assumptions. Existing board profiles remain available.
 
-The build produces separate main code and built-in font images under `main.bin/`, plus bootloader, Flash table and the E0470A03 waveform image. Do not use the old small diagnostic image addresses without accounting for the font/resource image.
+The build produces separate main code and built-in font images under `main.bin/`, the independent USB recovery loader, bootloader, Flash table and E0470A03 waveform. Normal USB updates contain only application/font/waveform. See [USB recovery and protection boundaries](DFU_SF32LB527.md) before the first installation.
 
 | Image | NOR address | Partition capacity |
 |---|---|---|
 | `ftab.bin` | `0x12000000` | 32KiB |
 | `bootloader.bin` | `0x12010000` | 64KiB |
+| `recovery.bin` | `0x12020000` | 1536KiB |
 | `ER_IROM1.bin` | `0x12200000` | 2MiB |
 | `ER_IROM2.bin` | `0x12400000` | 10MiB |
 | `epd_waveform.bin` | `0x12EC0000` | 256KiB |
+| `update_state.bin` (factory only) | `0x12F00000` | 8KiB |
 
 Before first installation, read and verify the complete 16MiB NOR, not only the application partition. Keep that backup private and separate from the public source and flash bundle. The TF card is not formatted by this BSP. This image layout differs from the original application and standalone diagnostic firmware.
 
-`package_527.py` checks the board and image sizes, then copies all five images with a self-contained sftool configuration and SHA-256 manifest into a new output directory. It does not access the serial port or flash the board. The CI artifact includes this bundle under `flash_bundle/`.
+`package_527.py` validates board, vectors, sizes and hashes. Its default `usb_update/` output contains only the three permitted update images and the USB tool. Explicit `--factory` additionally packages boot/recovery, initial state and `sftool_factory.json`; CI places this separately under `factory_install/`. Packaging never accesses the serial port or flashes the board.
 
 ## Driver integration
 
@@ -53,6 +57,8 @@ Before first installation, read and verify the complete 16MiB NOR, not only the 
 - Display refresh serializes touch, frontlight checks and diagnostic TF operations. Hardware protection remains enabled. Input during a full refresh can be delayed or coalesced.
 
 Battery/charger routing, physical keys and deep-sleep wake routing have not been validated on this board. The BSP does not reuse old-board ADC/key assignments. Bluetooth/PAN and weather code are retained but require separate end-to-end validation with a phone/network.
+
+The recovery boot path now uses the original firmware's PA34 active-high power-key definition; it does not enable the reader's general button/ADC driver. USB recovery is also available from Settings, and is selected automatically after interrupted updates or failed image checks.
 
 ## Validation status
 

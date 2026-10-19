@@ -360,6 +360,7 @@ int handleSettingsPage(Renderer *renderer, UIAction action, bool needs_redraw)
 {
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
   if((action==SELECT_BOX||action==SELECT)&&settings_selected_idx==SET_FRONTLIGHT)return 3;
+  if((action==SELECT_BOX||action==SELECT)&&settings_selected_idx==SET_USB_DFU)return 4;
   if(action==SELECT&&settings_selected_idx==SET_TOUCH) {
     render_settings_page(renderer);return 0; /* Touch-only board must remain operable. */
   }

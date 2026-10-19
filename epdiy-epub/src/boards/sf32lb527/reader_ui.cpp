@@ -6,9 +6,13 @@
 #include <algorithm>
 extern "C" {
 #include "board527.h"
+#include "board.h"
+#include "drv_flash.h"
+#include "../../../dfu527/common/reader_dfu.h"
 }
 extern int settings_selected_idx;
 volatile int reader527_light_hit=-1;
+volatile int reader527_dfu_hit=-1;
 
 static std::string fit(Renderer *r,const char *text,int width)
 {
@@ -49,9 +53,9 @@ void reader527_settings(Renderer *r)
 {
     clear_areas();r->clear_screen();int w=r->get_page_width(),h=r->get_page_height();
     label(r,0,20,w,64,"功能设置");
-    int side=16,arrow=56,gap=14,top=112,row=std::min(112,(h-290-5*gap)/6);
+    int side=16,arrow=56,gap=12,top=112,row=std::min(100,(h-290-6*gap)/7);
     int body_x=side+arrow,body_w=w-2*(side+arrow);
-    char texts[6][96];
+    char texts[7][96];
     rt_snprintf(texts[0],sizeof(texts[0]),"触控：已启用");
     int minutes=screen_get_timeout_shutdown_minutes();
     if(minutes)rt_snprintf(texts[1],sizeof(texts[1]),"待机：%d 分钟",minutes);
@@ -63,7 +67,8 @@ void reader527_settings(Renderer *r)
     rt_snprintf(texts[4],sizeof(texts[4]),"阅读设置");
     unsigned cold=0,warm=0;board527_frontlight_get(&cold,&warm);
     rt_snprintf(texts[5],sizeof(texts[5]),"前光：冷 %u%% / 暖 %u%%",cold,warm);
-    for(int i=0;i<6;++i) {
+    rt_snprintf(texts[6],sizeof(texts[6]),"USB 固件升级");
+    for(int i=0;i<7;++i) {
         int y=top+i*(row+gap);
         button(r,i*3+2,body_x,y,body_w,row,texts[i],settings_selected_idx==i);
         if(i>=SET_TIMEOUT&&i<=SET_BLUETOOTH) {
@@ -103,5 +108,38 @@ bool reader527_frontlight(Renderer *r,UIAction action)
     int gap=20,cw=(w-48-gap)/2;
     button(r,4,24,h-145,cw,96,"关闭前光");
     button(r,5,24+cw+gap,h-145,cw,96,"返回设置");
+    return true;
+}
+bool reader527_dfu_page(Renderer *r,UIAction action)
+{
+    static bool failed=false;
+    if(action==NONE)failed=false;
+    if(action==SELECT) {
+        int hit=reader527_dfu_hit;reader527_dfu_hit=-1;
+        if(hit==1)return false;
+        if(hit==0) {
+            uint32_t vectors[2];
+            if(rt_flash_read(R527_LOADER_BASE,(uint8_t *)vectors,8)!=8||
+               vectors[0]<0x20000000u||vectors[0]>0x2007fc00u||
+               !(vectors[1]&1)||vectors[1]<R527_LOADER_BASE||
+               vectors[1]>=R527_LOADER_BASE+R527_LOADER_SIZE)failed=true;
+            else {
+                r->clear_screen();label(r,20,260,r->get_page_width()-40,90,"正在进入 USB 升级模式");
+                label(r,20,380,r->get_page_width()-40,90,"连接电脑，运行配套升级工具");
+                r->flush_display();board527_frontlight_set(0,0);board527_touch_power(0);
+                board527_display_off();HAL_Set_backup(RTC_BAKCUP_OTA_FORCE_MODE,R527_COOKIE);
+                rt_thread_mdelay(100);drv_reboot();
+            }
+        }
+    }
+    clear_areas();r->clear_screen();int w=r->get_page_width(),h=r->get_page_height();
+    label(r,0,60,w,90,"USB 固件升级");
+    label(r,20,250,w-40,70,"进入后暂时退出阅读器");
+    label(r,20,340,w-40,70,"使用 USB 数据线连接电脑");
+    label(r,20,430,w-40,70,"升级完成后自动返回阅读器");
+    if(failed)label(r,20,550,w-40,70,"未安装恢复程序，请先首次安装");
+    int cw=(w-68)/2;
+    button(r,0,24,h-165,cw,100,"进入升级");
+    button(r,1,44+cw,h-165,cw,100,"返回设置");
     return true;
 }

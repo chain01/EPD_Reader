@@ -769,6 +769,11 @@ void handleUserInteraction(Renderer *renderer, UIAction ui_action, bool needs_re
     switch (ui_state)
     {
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+    case USB_DFU_PAGE:
+      if(!reader527_dfu_page(renderer,ui_action)) {
+        ui_state=SETTINGS_PAGE;handleSettingsPage(renderer,NONE,true);
+      }
+      break;
     case FRONTLIGHT_PAGE:
       if(!reader527_frontlight(renderer,ui_action)) {
         ui_state=SETTINGS_PAGE;handleSettingsPage(renderer,NONE,true);
@@ -872,6 +877,7 @@ void handleUserInteraction(Renderer *renderer, UIAction ui_action, bool needs_re
       int settings_result = handleSettingsPage(renderer, ui_action, needs_redraw);
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
       if(settings_result==3){ui_state=FRONTLIGHT_PAGE;reader527_frontlight(renderer,NONE);break;}
+      if(settings_result==4){ui_state=USB_DFU_PAGE;reader527_dfu_page(renderer,NONE);break;}
 #endif
       if (settings_result == 1)
       {
@@ -913,6 +919,7 @@ const char* getCurrentPageName() {
     case READING_SETTINGS: return "READING_SETTINGS";
     case SETTINGS_PAGE: return "SETTINGS_PAGE";
     case FRONTLIGHT_PAGE: return "FRONTLIGHT_PAGE";
+    case USB_DFU_PAGE: return "USB_DFU_PAGE";
     case WEATHER_PAGE: return "WEATHER_PAGE";
     case WEATHER_CITY_PAGE: return "WEATHER_CITY_PAGE";
     case WELCOME_PAGE:  return "WELCOME_PAGE";

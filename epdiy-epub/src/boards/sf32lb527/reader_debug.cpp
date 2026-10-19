@@ -12,7 +12,7 @@ extern Renderer *renderer;
 extern AppUIState ui_state;
 extern void handleUserInteraction(Renderer *,UIAction,bool);
 extern void back_to_main_page();
-enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP};
+enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER};
 static void dump_frame(void)
 {
     const uint8_t *frame=board527_framebuffer();const unsigned size=1216*684/2;
@@ -29,13 +29,18 @@ static void dump_frame(void)
 }
 bool reader527_debug_message(uint32_t msg,Renderer *r)
 {
-    if(msg<DEBUG_HOME||msg>DEBUG_DUMP)return false;
+    if(msg<DEBUG_HOME||msg>DEBUG_DFU_ENTER)return false;
     if(msg==DEBUG_DUMP){dump_frame();return true;}
+    if(msg==DEBUG_DFU_ENTER) {
+        if(ui_state==USB_DFU_PAGE){reader527_dfu_hit=0;handleUserInteraction(r,SELECT,false);}
+        return true;
+    }
     if(msg==DEBUG_HOME){ui_state=MAIN_PAGE;}
     else if(msg==DEBUG_LIBRARY)ui_state=SELECTING_EPUB;
     else if(msg==DEBUG_SETTINGS)ui_state=SETTINGS_PAGE;
     else if(msg==DEBUG_LIGHT)ui_state=FRONTLIGHT_PAGE;
     else if(msg==DEBUG_READING){ui_state=READING_SETTINGS;reading_settings_draw(r);}
+    else if(msg==DEBUG_DFU)ui_state=USB_DFU_PAGE;
     handleUserInteraction(r,NONE,true);r->flush_display();
     rt_kprintf("UI_DEBUG_DONE state=%u\n",(unsigned)ui_state);return true;
 }
@@ -53,8 +58,8 @@ static int ui(int argc,char **argv)
         return 0;
     }
     if(argc==2) {
-        const char *names[]={"home","library","settings","light","reading","dump"};
-        for(unsigned n=0;n<6;++n)if(!strcmp(argv[1],names[n])) {
+        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter"};
+        for(unsigned n=0;n<8;++n)if(!strcmp(argv[1],names[n])) {
             uint32_t msg=DEBUG_HOME+n;return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
         const char *actions[]={"prev","next","select","menu"};
@@ -63,6 +68,6 @@ static int ui(int argc,char **argv)
             uint32_t msg=values[n];return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
     }
-    rt_kprintf("ui home/library/settings/light/reading/dump/status/prev/next/select/menu\n");return -RT_EINVAL;
+    rt_kprintf("ui home/library/settings/light/reading/dump/dfu/dfu-enter/status/prev/next/select/menu\n");return -RT_EINVAL;
 }
 MSH_CMD_EXPORT(ui, Reader UI diagnostics);

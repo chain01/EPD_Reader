@@ -26,17 +26,12 @@
       },
       {
         "offset": "0x00020000",
-        "max_size": "0x00060000",
+        "max_size": "0x00180000",
         "tags": [
-          "DFU_FLASH_CODE"
-        ]
-      },
-      {
-        "offset": "0x00080000",
-        "max_size": "0x00120000",
-        "tags": [
-          "DFU_DOWNLOAD_REGION"
-        ]
+          "READER_RECOVERY"
+        ],
+        "img": "recovery",
+        "exec": "recovery"
       },
       {
         "offset": "0x001a0000",
@@ -87,6 +82,13 @@
         "img": "wave_table",
         "tags": [
           "CUSTOM_EPD_WAVE_TABLE"
+        ]
+      },
+      {
+        "offset": "0x00F00000",
+        "max_size": "0x00002000",
+        "tags": [
+          "READER_UPDATE_META"
         ]
       }
     ]

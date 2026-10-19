@@ -139,6 +139,12 @@ switch (ui_state)
         if(x>=a.start_x&&x<=a.end_x&&y>=a.start_y&&y<=a.end_y){reader527_light_hit=n;action=SELECT;break;}
     }
     break;
+  case USB_DFU_PAGE:
+    for(int n=0;n<2;++n) {
+        AreaRect &a=g_area_array[n];
+        if(x>=a.start_x&&x<=a.end_x&&y>=a.start_y&&y<=a.end_y){reader527_dfu_hit=n;action=SELECT;break;}
+    }
+    break;
 #else
     if (x >= g_area_array[0].start_x && x <= g_area_array[0].end_x && y >= g_area_array[0].start_y && y <= g_area_array[0].end_y)
     {
