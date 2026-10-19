@@ -13,6 +13,9 @@ public:
     }
     void powerOnLcd() {}
     void powerOffLcd(){board527_display_off();}
+    /* A transient hourglass would require another complete waveform before
+     * the requested page. Keep the last page visible until its replacement. */
+    void show_busy() override {}
     void flush_display() override
     {
         int rc=board527_display_present(m_frame_buffer);
@@ -22,6 +25,9 @@ public:
     {
         (void)x;(void)y;(void)w;(void)h;flush_display();
     }
-    bool has_gray(){return needs_gray_flush;}
+    /* In the EPUB parser this legacy hook requests a separate white-page
+     * flush before drawing. The driver already tracks all old/new gray levels
+     * and its cleaning interval, so no intermediate white image is needed. */
+    bool has_gray() override {return false;}
     void reset() override {}
 };

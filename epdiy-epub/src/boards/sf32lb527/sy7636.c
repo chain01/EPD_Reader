@@ -16,6 +16,8 @@ static unsigned cycles,errors;
 static struct rt_mutex aw_lock;
 static int aw_lock_ready;
 static unsigned aw_generation;
+static rt_tick_t power_off_tick;
+static int discharge_pending;
 
 static int reg_read(struct rt_i2c_bus_device *bus,unsigned addr,uint8_t reg,uint8_t *value)
 {
@@ -114,6 +116,14 @@ static int aw_init(void)
 static int sy_config(void)
 {
     uint8_t op=0,h=0,ldo=0;
+    /* Preserve the complete 450 ms EN-low discharge interval. Let the UI and
+     * waveform preparation run during it, then wait only for any remainder. */
+    if(discharge_pending) {
+        rt_tick_t interval=rt_tick_from_millisecond(450);
+        rt_tick_t elapsed=rt_tick_get()-power_off_tick;
+        if(elapsed<interval)rt_thread_delay(interval-elapsed);
+        discharge_pending=0;
+    }
     if(ge(4,0)||ge(6,1))return -1;
     rt_thread_mdelay(5);
     if(!sy_bus)sy_bus=open_bus("i2c1");
@@ -149,8 +159,8 @@ rt_err_t tps_enter_sleep(void)
     }
     rt_thread_mdelay(150);
     if(ge(6,0))rc=-1;
+    power_off_tick=rt_tick_get();discharge_pending=1;
     configured=powered=0;
-    rt_thread_mdelay(450); /* Allow negative gate rail discharge before restart. */
     return rc? -RT_ERROR:RT_EOK;
 }
 rt_err_t tps_exit_sleep(void)

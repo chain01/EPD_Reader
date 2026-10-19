@@ -16,6 +16,9 @@
 #include "reading_settings.h"
 #include "ulog.h"
 #include "UIRegionsManager.h"
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#include "boards/sf32lb527/reader_ui.h"
+#endif
 #if !defined(SF32LB57X) && !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
 #include "boards/battery/ADCBattery.h"
 #endif
@@ -489,7 +492,13 @@ void handleEpubList(Renderer *renderer, UIAction action, bool needs_redraw)
     ulog_i("main", "Creating epub list");
     epub_list = new EpubList(renderer, epub_list_state);
     epub_list->setTouchControls(touch_controls);
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+    struct stat books_dir;
+    const char *library_path=(stat("/books",&books_dir)==0&&S_ISDIR(books_dir.st_mode))?"/books":"/";
+    if (epub_list->load(library_path))
+#else
     if (epub_list->load("/"))
+#endif
     {
       ulog_i("main", "Epub files loaded");
     }
@@ -500,6 +509,7 @@ void handleEpubList(Renderer *renderer, UIAction action, bool needs_redraw)
     library_bottom_mode = false;
     library_bottom_idx = 1;
   }
+  if(epub_list_state.num_epubs==0){library_bottom_mode=true;library_bottom_idx=1;}
   switch (action)
   {
   case UP:
@@ -748,6 +758,13 @@ void handleUserInteraction(Renderer *renderer, UIAction ui_action, bool needs_re
     uint32_t start_tick = rt_tick_get();
     switch (ui_state)
     {
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+    case FRONTLIGHT_PAGE:
+      if(!reader527_frontlight(renderer,ui_action)) {
+        ui_state=SETTINGS_PAGE;handleSettingsPage(renderer,NONE,true);
+      }
+      break;
+#endif
     case MAIN_PAGE:
       handleMainPage(renderer, ui_action, needs_redraw);
       if (ui_action == SELECT && screen_get_main_selected_option() == OPTION_ENTER_SETTINGS)
@@ -843,6 +860,9 @@ void handleUserInteraction(Renderer *renderer, UIAction ui_action, bool needs_re
     case SETTINGS_PAGE:
     {
       int settings_result = handleSettingsPage(renderer, ui_action, needs_redraw);
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+      if(settings_result==3){ui_state=FRONTLIGHT_PAGE;reader527_frontlight(renderer,NONE);break;}
+#endif
       if (settings_result == 1)
       {
         // 回主页
@@ -882,6 +902,7 @@ const char* getCurrentPageName() {
     case READING_EPUB:  return "READING_EPUB";
     case READING_SETTINGS: return "READING_SETTINGS";
     case SETTINGS_PAGE: return "SETTINGS_PAGE";
+    case FRONTLIGHT_PAGE: return "FRONTLIGHT_PAGE";
     case WEATHER_PAGE: return "WEATHER_PAGE";
     case WEATHER_CITY_PAGE: return "WEATHER_CITY_PAGE";
     case WELCOME_PAGE:  return "WELCOME_PAGE";
@@ -1055,10 +1076,14 @@ void main_task(void *param)
 
   screen_init(TIMEOUT_SHUTDOWN_TIME);
 
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+  while (true) /* Touch wake remains available; physical hibernate routing is unverified. */
+#else
   while ((rt_tick_get_millisecond() - last_user_interaction < 60 * 1000 * 60 * TIMEOUT_SHUTDOWN_TIME))
+#endif
   {
     if (rt_tick_get_millisecond() - last_user_interaction >= 60 * 1000 * screen_get_timeout_shutdown_minutes() && 
-      battery && battery->get_low_power_state() != 1 && 
+      (!battery || battery->get_low_power_state() != 1) &&
       ui_state != WELCOME_PAGE && 
       ui_state != CHARGING_PAGE && 
       ui_state != LOW_POWER_PAGE &&
@@ -1070,6 +1095,9 @@ void main_task(void *param)
     uint32_t msg_data;
     if (rt_mq_recv(ui_queue, &msg_data, sizeof(uint32_t), rt_tick_from_millisecond(500)) == RT_EOK)
     {
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+      if(reader527_debug_message(msg_data,renderer))continue;
+#endif
       UIAction ui_action = (UIAction)msg_data;
     
       if (ui_action == MSG_UPDATE_CHARGE_STATUS)
@@ -1311,7 +1339,7 @@ extern "C"
   {
 #ifdef RT_USING_PM
     rt_pm_request(PM_SLEEP_MODE_IDLE);
-#endif 
+#endif
     ulog_i("main", "epub list state num_epubs=%d", epub_list_state.num_epubs);
     ulog_i("main", "epub list state is_loaded=%d", epub_list_state.is_loaded);
     ulog_i("main", "epub list state selected_item=%d", epub_list_state.selected_item);

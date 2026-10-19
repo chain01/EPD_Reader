@@ -21,6 +21,7 @@ jobs:
           - sf32-oed-epd_v11
           - sf32-oed-epd_v12
           - sf32-oed-epd_v12_spi
+          - sf32lb527-oed-e0470a03
       fail-fast: false
     
     name: Build ${{ matrix.target }}
@@ -42,6 +43,10 @@ jobs:
         source ./export.sh
         cd ../epdiy-epub/project
         scons --board=${{ matrix.target }} --board_search_path=.. -j$(nproc)
+
+    - name: Package SF32LB527 images
+      if: matrix.target == 'sf32lb527-oed-e0470a03'
+      run: python3 tools/package_527.py --output epdiy-epub/project/build_sf32lb527-oed-e0470a03_hcpu/flash_bundle
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -101,4 +106,3 @@ jobs:
           ### Installation
           1. Extract the zip file for your target board
           2. Flash the binaries to your EPD reader device
-          

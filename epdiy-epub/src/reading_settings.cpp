@@ -327,6 +327,13 @@ void reading_settings_draw(Renderer *renderer)
                 snprintf(val_buf, sizeof(val_buf), "< %d px >", MARGINS[g_margin_idx]);
                 break;
             }
+            /* A file name may be much wider than its byte count, especially
+             * with a large reading font on the 684-pixel portrait display. */
+            while(renderer->get_text_width(val_buf)>page_w-x_value-20 && strlen(val_buf)>3) {
+                size_t end=strlen(val_buf)-1;
+                while(end && (static_cast<unsigned char>(val_buf[end])&0xc0)==0x80)--end;
+                val_buf[end]=0;
+            }
             renderer->draw_text(x_value, y, val_buf, false, false);
         }
 

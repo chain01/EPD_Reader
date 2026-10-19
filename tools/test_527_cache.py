@@ -1,0 +1,154 @@
+"""Replay packed-row cache against the waveform LUT, including dense gray data.
+
+Uses the actual C routines from the driver, compiled with the host gcc. The test
+checks every expanded byte, raw/RLE records, hash reuse and bounded overflow.
+"""
+from pathlib import Path
+import argparse,struct,subprocess,tempfile
+
+p=argparse.ArgumentParser();p.add_argument('--gcc',default='gcc');a=p.parse_args()
+root=Path(__file__).resolve().parents[1]
+driver=(root/'epdiy-epub/src/boards/sf32lb527/epd_e0470a03.c').read_text()
+section=driver[driver.index('/* Every waveform phase'):driver.index('static int drive')]
+policy=driver[driver.index('static unsigned refresh_mode'):driver.index('int board527_display_present')]
+present=driver[driver.index('int board527_display_present'):driver.index('int board527_display_init')]
+header=r'''
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <assert.h>
+#define W 1216
+#define H 684
+#define DATA_BYTES (W/4)
+#define ROW_BYTES (DATA_BYTES+12)
+#define CACHE_BYTES (3u*1024*1024)
+#define MAX_ROWS 32768
+#define HASH_SLOTS 65536
+#define MAX_PHASES 64
+#define ALIGN(n)
+#define RT_NULL NULL
+static uint8_t mixed[W*H],scan_cache[CACHE_BYTES];
+static uint16_t phase_rows[64][H],row_slots[HASH_SLOTS],row_map[H],unique_y[H];
+static uint32_t row_offsets[MAX_ROWS],row_hash[H],lut[256];
+static unsigned unique_rows,cached_rows,cache_used;
+static unsigned raw_cache;
+static unsigned packed_rows,reused_rows;
+static void *extra_allocation;
+static uint8_t *extra_cache;
+static unsigned extra_bytes;
+static size_t available_heap=3u*1024*1024;
+static size_t epub_mem_available_size(void){return available_heap;}
+static void *epub_mem_malloc(size_t n){return malloc(n);}
+static void epub_mem_free(void *p){free(p);}
+static uint8_t phase_luts[64][256];
+static uint8_t phases[MAX_PHASES][64];
+static void mpu_dcache_clean(void *p,unsigned n){(void)p;(void)n;}
+static void waveform_bin_reader_fill_lut(uint32_t *out,unsigned f)
+{
+    for(unsigned i=0;i<256;++i)out[i]=((phases[f][i/4]>>(6-2*(i%4)))&3)<<3;
+}
+'''
+workspace=driver[driver.index('typedef union {'):driver.index('L2_NON_RET_BSS_SECT_BEGIN')]
+header+=workspace+'\nstatic PhaseWorkspace workspace;\n#define full_frame workspace.frame\n'
+present_stubs=r'''
+#define RT_WAITING_FOREVER -1
+#define RT_ENOMEM 5
+static int ready=1,previous_known,lock,drive_result;
+static unsigned full_period=10,refresh_index,drive_calls,drive_mode;
+static void rt_mutex_take(int *p,int wait){(void)wait;++*p;}
+static void rt_mutex_release(int *p){--*p;}
+static void lock_devices(void){}
+static void unlock_devices(void){}
+static int drive(unsigned mode){++drive_calls;drive_mode=mode;return drive_result;}
+static uint8_t requested[W*H/2];
+'''
+main=r'''
+int main(int argc,char **argv)
+{
+    memset(mixed,255,sizeof(mixed));memset(requested,255,sizeof(requested));
+    previous_known=1;refresh_index=1;requested[0]=0xf7;drive_result=-RT_ENOMEM;
+    assert(board527_display_present(requested)==-RT_ENOMEM);
+    assert(previous_known&&refresh_index==1&&lock==0&&drive_calls==1&&drive_mode==5);
+    for(unsigned i=0;i<W*H;++i)assert((mixed[i]&15)==15);
+    drive_result=0;
+    assert(board527_display_present(requested)==0&&drive_calls==2&&refresh_index==2);
+    assert((mixed[0]&15)==7);
+    assert(board527_display_present(requested)==0&&drive_calls==2);
+    previous_known=0;refresh_index=0;memset(requested,255,sizeof(requested));
+    assert(board527_display_present(requested)==0&&drive_calls==3&&drive_mode==3);
+    assert(previous_known&&lock==0);
+    puts("PRESENT_STATE_AND_SKIP_PASS");
+    for(unsigned period=5;period<=20;period*=2)for(unsigned index=0;index<=2*period;++index) {
+        for(int gray=0;gray<4;++gray)
+            assert(refresh_mode(period,index,gray&1,gray&2)==
+                (index%period==0?0:gray?5:1));
+        assert(refresh_mode(0,index,1,1)==0);
+    }
+    puts("REFRESH_POLICY_PASS");
+    assert(argc==2);FILE *wave=fopen(argv[1],"rb");assert(wave);
+    unsigned count;assert(fread(&count,1,4,wave)==4&&count<=MAX_PHASES);
+    assert(fread(phases,64,count,wave)==count);fclose(wave);
+    for(unsigned test=0;test<6;++test) {
+        unsigned random=0x527e0470u;
+        for(unsigned y=0;y<H;++y)for(unsigned x=0;x<W;++x) {
+            unsigned value=test==0?255:test==1?((x/76)<<4)|((y/43)&15):
+                (((x/16+y/20)&15)<<4)|((x/23+y/31)&15);
+            if(test==3) {
+                unsigned old=(x*13+y*7)%W<60?(x+y*31)&15:15;
+                unsigned next=(x*17+y*11)%W<80?(x/3+y*41)&15:15;
+                value=(old<<4)|next;
+            }
+            if(test==4||test==5) {
+                random^=random<<13;random^=random>>17;random^=random<<5;
+                value=test==5&&x>=500?255:random&255;
+            }
+            mixed[y*W+x]=value;
+        }
+        int rc=prepare_phases(count);
+        if(rc){assert(test==4&&cache_used<=CACHE_BYTES+extra_bytes);printf("CACHE_BOUNDED_REJECT case=%u bytes=%u\n",test,cache_used);release_extra_cache();continue;}
+        memset(full_frame,0,sizeof(full_frame));
+        for(unsigned f=0;f<count;++f) {
+            expand_phase(f);waveform_bin_reader_fill_lut(lut,f);
+            for(unsigned y=0;y<H;++y) {
+                for(unsigned x=0;x<DATA_BYTES;++x) {
+                    uint8_t expected=0;
+                    for(unsigned k=0;k<4;++k)expected|=((lut[mixed[y*W+4*x+k]]>>3)&3)<<(6-2*k);
+                    assert(full_frame[y*ROW_BYTES+x]==expected);
+                }
+                for(unsigned x=DATA_BYTES;x<ROW_BYTES;++x)assert(full_frame[y*ROW_BYTES+x]==0);
+            }
+        }
+        promote_raw_cache();
+        if(raw_cache)for(unsigned f=0;f<count;++f) {
+            waveform_bin_reader_fill_lut(lut,f);
+            for(unsigned y=0;y<H;++y)for(unsigned x=0;x<DATA_BYTES;++x) {
+                uint8_t expected=0;
+                for(unsigned k=0;k<4;++k)expected|=((lut[mixed[y*W+4*x+k]]>>3)&3)<<(6-2*k);
+                assert(raw_row(phase_rows[f][y])[x]==expected);
+            }
+        }
+        printf("CACHE_REPLAY_PASS case=%u rows=%u bytes=%u raw=%u packed=%u reused=%u\n",test,cached_rows,cache_used,raw_cache,packed_rows,reused_rows);
+        release_extra_cache();assert(!extra_cache&&!extra_allocation&&!extra_bytes);
+    }
+    available_heap=512u*1024; /* Reserved application heap must not be borrowed. */
+    cached_rows=0;cache_used=CACHE_BYTES;memset(row_slots,0,sizeof(row_slots));uint8_t row[DATA_BYTES];memset(row,0xa5,sizeof(row));
+    assert(cache_row(row)==-1&&cache_used==CACHE_BYTES);
+    puts("CACHE_OVERFLOW_PASS");return 0;
+}
+'''
+with tempfile.TemporaryDirectory(prefix='reader527-cache-') as temp:
+    path=Path(temp);c=path/'cache_test.c';exe=path/'cache_test.exe';c.write_text(header+section+policy+present_stubs+present+main)
+    subprocess.run([a.gcc,'-O2','-Wall','-Wextra',str(c),'-o',str(exe)],check=True)
+    wave=(root/'epdiy-epub/waveform/e0470a03/epd_waveform.bin').read_bytes()
+    for mode in (0,1,3,5):
+        zones,offset=struct.unpack_from('<II',wave,8+8*mode)
+        for zone in range(zones):
+            low,high,count,table=struct.unpack_from('<iiII',wave,offset+16*zone)
+            if low<=28<high:break
+        else:raise AssertionError(f'Missing temperature zone for mode {mode}')
+        data=path/f'mode{mode}.bin';data.write_bytes(struct.pack('<I',count)+wave[table:table+64*count])
+        if mode==5:
+            assert all(wave[table+64*f+63]&3==0 for f in range(count)), 'GL16 must leave white-to-white undriven'
+        print(f'MODE_REPLAY mode={mode} frames={count}',flush=True)
+        subprocess.run([str(exe),str(data)],check=True)

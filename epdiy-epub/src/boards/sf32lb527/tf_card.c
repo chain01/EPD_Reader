@@ -248,8 +248,22 @@ int tf_card_start(void)
     if(!thread)return -RT_ENOMEM;
     started=1;rt_thread_startup(thread);return 0;
 }
-void tf_card_display_lock(void){if(started)rt_mutex_take(&lock,RT_WAITING_FOREVER);}
-void tf_card_display_unlock(void){if(started)rt_mutex_release(&lock);}
+void tf_card_display_lock(void)
+{
+    if(started) {
+        rt_mutex_take(&lock,RT_WAITING_FOREVER);
+        struct rt_spi_device *spi=(struct rt_spi_device *)rt_device_find("tfspi");
+        if(spi)rt_mutex_take(&spi->bus->lock,RT_WAITING_FOREVER);
+    }
+}
+void tf_card_display_unlock(void)
+{
+    if(started) {
+        struct rt_spi_device *spi=(struct rt_spi_device *)rt_device_find("tfspi");
+        if(spi)rt_mutex_release(&spi->bus->lock);
+        rt_mutex_release(&lock);
+    }
+}
 
 int board527_storage_mount(void)
 {
