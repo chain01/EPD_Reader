@@ -3,7 +3,7 @@
 #include <rtthread.h>
 #include "mem_section.h"
 
-#ifdef SF32LB57X
+#if defined(SF32LB57X) || defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
 #define EPUB_MEMHEAP_POOL_SIZE (4*1024*1024)
 #else
 #define EPUB_MEMHEAP_POOL_SIZE (6*1024*1024)

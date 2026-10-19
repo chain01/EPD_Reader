@@ -16,7 +16,7 @@
 #include "reading_settings.h"
 #include "ulog.h"
 #include "UIRegionsManager.h"
-#ifndef SF32LB57X
+#if !defined(SF32LB57X) && !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
 #include "boards/battery/ADCBattery.h"
 #endif
 
@@ -1107,7 +1107,7 @@ void main_task(void *param)
           rt_kprintf("[ADCBattery] Battery Level %f, percent %d, charging %d\n",
                      voltage, (int)percentage, is_charging);
 
-#ifndef SF32LB57X
+#if !defined(SF32LB57X) && !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
           ADCBattery* adc_battery = static_cast<ADCBattery*>(battery);
           if (percentage < 2 && !is_charging && adc_battery->get_low_power_state() != 1) {
             adc_battery->set_low_power_state(1);
@@ -1309,7 +1309,9 @@ extern "C"
 {
   int main()
   {
-    rt_pm_request(PM_SLEEP_MODE_IDLE); 
+#ifdef RT_USING_PM
+    rt_pm_request(PM_SLEEP_MODE_IDLE);
+#endif 
     ulog_i("main", "epub list state num_epubs=%d", epub_list_state.num_epubs);
     ulog_i("main", "epub list state is_loaded=%d", epub_list_state.is_loaded);
     ulog_i("main", "epub list state selected_item=%d", epub_list_state.selected_item);
