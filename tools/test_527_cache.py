@@ -6,7 +6,9 @@ checks every expanded byte, raw/RLE records, hash reuse and bounded overflow.
 from pathlib import Path
 import argparse,struct,subprocess,tempfile
 
-p=argparse.ArgumentParser();p.add_argument('--gcc',default='gcc');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--gcc',default='gcc')
+p.add_argument('--mixed',type=Path,help='Optional 1216x684 old<<4|new transition bytes from a real page pair')
+a=p.parse_args()
 root=Path(__file__).resolve().parents[1]
 driver=(root/'epdiy-epub/src/boards/sf32lb527/epd_e0470a03.c').read_text()
 section=driver[driver.index('/* Every waveform phase'):driver.index('static int drive')]
@@ -26,6 +28,7 @@ header=r'''
 #define MAX_ROWS 32768
 #define HASH_SLOTS 65536
 #define MAX_PHASES 64
+#define DICT_INDEX_BYTES (W*H/2)
 #define ALIGN(n)
 #define RT_NULL NULL
 static uint8_t mixed[W*H],scan_cache[CACHE_BYTES];
@@ -33,6 +36,7 @@ static uint16_t phase_rows[64][H],row_slots[HASH_SLOTS],row_map[H],unique_y[H];
 static uint32_t row_offsets[MAX_ROWS],row_hash[H],lut[256];
 static unsigned unique_rows,cached_rows,cache_used;
 static unsigned raw_cache;
+static unsigned dictionary_mode,dictionary_count;
 static unsigned packed_rows,reused_rows;
 static void *extra_allocation;
 static uint8_t *extra_cache;
@@ -42,6 +46,7 @@ static size_t epub_mem_available_size(void){return available_heap;}
 static void *epub_mem_malloc(size_t n){return malloc(n);}
 static void epub_mem_free(void *p){free(p);}
 static uint8_t phase_luts[64][256];
+static uint32_t pair_words[65536/4];
 static uint8_t phases[MAX_PHASES][64];
 static int prepared;
 static unsigned prepared_mode,prepared_count,prepared_index,prepared_ms;
@@ -64,6 +69,7 @@ typedef unsigned WAVE_TABLE_MODE_T;
 static unsigned loaded_count,temperature=28,ticks;
 static unsigned waveform_bin_reader_get_frames(unsigned t,unsigned m){(void)t;(void)m;return loaded_count;}
 static unsigned rt_tick_get(void){return ++ticks;}
+static unsigned HAL_DBG_DWT_GetCycles(void){return ++ticks;}
 #define rt_kprintf(...) ((void)0)
 static int ready=1,previous_known,lock,drive_result;
 static unsigned full_period=10,refresh_index,drive_calls,drive_mode;
@@ -81,6 +87,23 @@ static int cancel_pulse(void *arg){return ++cancellation_checks==*(int *)arg;}
 main=r'''
 int main(int argc,char **argv)
 {
+    /* All 65,536 transition pairs, not only pairs in the sample images. */
+    for(unsigned i=0;i<256;++i)phase_luts[0][i]=(i^(i>>3))&3;
+    make_pair_table(phase_luts[0]);
+    for(unsigned i=0;i<65536;++i)
+        assert(((uint8_t *)pair_words)[i]==(phase_luts[0][i&255]<<2|phase_luts[0][i>>8]));
+    unsigned random_codec=0x527e0470u;
+    for(unsigned test=0;test<5000;++test) {
+        uint8_t raw[DATA_BYTES],encoded[DATA_BYTES*2+2],decoded[DATA_BYTES+2];
+        for(unsigned i=0;i<DATA_BYTES;++i) {
+            random_codec^=random_codec<<13;random_codec^=random_codec>>17;random_codec^=random_codec<<5;
+            raw[i]=(test%3&&i%17<test%17)?0:(random_codec&255);
+        }
+        unsigned size=encode_row(raw,encoded+2);encoded[0]=size;encoded[1]=size>>8;
+        memset(decoded,0xa5,sizeof(decoded));expand_row(encoded,decoded+1);
+        assert(!memcmp(raw,decoded+1,DATA_BYTES)&&decoded[0]==0xa5&&decoded[DATA_BYTES+1]==0xa5);
+    }
+    puts("PAIR_LUT_EXHAUSTIVE_AND_CODEC_FUZZ_PASS");
     memset(mixed,255,sizeof(mixed));memset(requested,255,sizeof(requested));
     previous_known=1;refresh_index=1;requested[0]=0xf7;drive_result=-RT_ENOMEM;
     assert(board527_display_present(requested)==-RT_ENOMEM);
@@ -101,7 +124,7 @@ int main(int argc,char **argv)
         assert(refresh_mode(0,index,1,1)==0);
     }
     puts("REFRESH_POLICY_PASS");
-    assert(argc==2);FILE *wave=fopen(argv[1],"rb");assert(wave);
+    assert(argc==2||argc==3);FILE *wave=fopen(argv[1],"rb");assert(wave);
     unsigned count;assert(fread(&count,1,4,wave)==4&&count<=MAX_PHASES);
     assert(fread(phases,64,count,wave)==count);fclose(wave);
     loaded_count=count;
@@ -127,7 +150,7 @@ int main(int argc,char **argv)
     for(unsigned i=0;i<W*H;++i)assert((mixed[i]&15)==3);
     assert(!prepared&&!extra_cache&&lock==0);
     puts("PREFETCH_HIT_MISS_CANCEL_STATE_PASS");
-    for(unsigned test=0;test<6;++test) {
+    for(unsigned test=0;test<(argc==3?7u:6u);++test) {
         unsigned random=0x527e0470u;
         for(unsigned y=0;y<H;++y)for(unsigned x=0;x<W;++x) {
             unsigned value=test==0?255:test==1?((x/76)<<4)|((y/43)&15):
@@ -142,6 +165,10 @@ int main(int argc,char **argv)
                 value=test==5&&x>=500?255:random&255;
             }
             mixed[y*W+x]=value;
+        }
+        if(test==6) {
+            FILE *capture=fopen(argv[2],"rb");assert(capture);
+            assert(fread(mixed,1,sizeof(mixed),capture)==sizeof(mixed));fclose(capture);
         }
         int rc=prepare_phases(count);
         if(rc){assert(test==4&&cache_used<=CACHE_BYTES+extra_bytes);printf("CACHE_BOUNDED_REJECT case=%u bytes=%u\n",test,cache_used);release_extra_cache();continue;}
@@ -166,7 +193,7 @@ int main(int argc,char **argv)
                 assert(raw_row(phase_rows[f][y])[x]==expected);
             }
         }
-        printf("CACHE_REPLAY_PASS case=%u rows=%u bytes=%u raw=%u packed=%u reused=%u\n",test,cached_rows,cache_used,raw_cache,packed_rows,reused_rows);
+        printf("CACHE_REPLAY_PASS case=%u rows=%u bytes=%u raw=%u dictionary=%u words=%u packed=%u reused=%u\n",test,cached_rows,cache_used,raw_cache,dictionary_mode,dictionary_count,packed_rows,reused_rows);
         release_extra_cache();assert(!extra_cache&&!extra_allocation&&!extra_bytes);
     }
     /* Old 512KiB allocation steps discarded nearly half a MiB in this case. */
@@ -194,4 +221,4 @@ with tempfile.TemporaryDirectory(prefix='reader527-cache-') as temp:
         if mode==5:
             assert all(wave[table+64*f+63]&3==0 for f in range(count)), 'GL16 must leave white-to-white undriven'
         print(f'MODE_REPLAY mode={mode} frames={count}',flush=True)
-        subprocess.run([str(exe),str(data)],check=True)
+        subprocess.run([str(exe),str(data)]+([str(a.mixed.resolve())] if a.mixed else []),check=True)

@@ -33,9 +33,7 @@
 typedef union {
     uint8_t frame[H * ROW_BYTES];
     struct {
-        uint32_t hashes[MAX_PHASES][H];
         uint32_t masks[H][8];
-        uint32_t planes[MAX_PHASES][16];
     } prep;
 } PhaseWorkspace;
 L2_NON_RET_BSS_SECT_BEGIN(epd_test)
@@ -46,8 +44,12 @@ L2_NON_RET_BSS_SECT(epd_test, ALIGN(64) static PhaseWorkspace workspace);
 L2_NON_RET_BSS_SECT(epd_test, static uint16_t phase_rows[MAX_PHASES][H]);
 L2_NON_RET_BSS_SECT(epd_test, static uint32_t row_offsets[MAX_ROWS]);
 L2_NON_RET_BSS_SECT(epd_test, static uint16_t row_slots[HASH_SLOTS]);
-L2_NON_RET_BSS_SECT(epd_test, static uint8_t phase_luts[MAX_PHASES][256]);
 L2_NON_RET_BSS_SECT_END
+/* Small hot tables belong in internal SRAM, not the external row store. */
+static uint8_t phase_luts[MAX_PHASES][256];
+ALIGN(32) static uint32_t pair_words[65536/4];
+static unsigned dictionary_mode,dictionary_count;
+#define DICT_INDEX_BYTES (W*H/2)
 #define full_frame workspace.frame
 static LCDC_HandleTypeDef lcd;
 static uint32_t lut[256];
@@ -230,6 +232,13 @@ L1_RET_CODE_SECT(epd527, __attribute__((noinline)) static int scan_frame(void))
 /* Every waveform phase is prepared before HV. Identical packed rows share
  * storage across phases; RLE compresses uniform areas. Each full frame is
  * expanded once and scanned over the entire panel, never in visible tiles. */
+static uint32_t prep_cycles[7];
+static void report_preparation(void)
+{
+    rt_kprintf("EPD527_PROFILE map_us=%u lut_us=%u reuse_us=%u pack_us=%u encode_us=%u lookup_us=%u promote_us=%u\n",
+        prep_cycles[0]/240,prep_cycles[1]/240,prep_cycles[2]/240,prep_cycles[3]/240,
+        prep_cycles[4]/240,prep_cycles[5]/240,prep_cycles[6]/240);
+}
 static int extend_cache(unsigned needed)
 {
     if(extra_cache)return needed<=extra_bytes?0:-1;
@@ -270,31 +279,73 @@ static void map_rows(void)
     for(unsigned y=0;y<H;++y) {
         if(preparation_cancelled())return;
         const uint8_t *row=mixed+y*W;uint32_t hash=2166136261u;
-        for(unsigned x=0;x<W;++x)hash=(hash^row[x])*16777619u;
+        const uint32_t *words=(const uint32_t *)row;
+        for(unsigned x=0;x<W/4;++x)hash=(hash^words[x])*16777619u;
         unsigned n;
         for(n=0;n<unique_rows;++n)
             if(row_hash[n]==hash&&!memcmp(row,mixed+unique_y[n]*W,W))break;
         if(n==unique_rows) {
             row_hash[n]=hash;unique_y[n]=y;++unique_rows;
+            uint32_t mask[8]={0};
             for(unsigned x=0;x<W;++x)
-                workspace.prep.masks[n][row[x]>>5]|=1u<<(row[x]&31);
+                mask[row[x]>>5]|=1u<<(row[x]&31);
+            memcpy(workspace.prep.masks[n],mask,sizeof(mask));
         }
         row_map[y]=n;
     }
 }
 
-static int cache_row(const uint8_t *raw)
+#if defined(__GNUC__) && !defined(__clang__)
+#define PREP_FAST __attribute__((optimize("O3"),noinline))
+#else
+#define PREP_FAST
+#endif
+/* Separate hot loops avoid the size-optimized caller's register spills.
+ * GPIO/LCDC scan code retains its electrically verified compiler settings. */
+static PREP_FAST void make_pair_table(const uint8_t *table)
 {
-    uint8_t encoded[DATA_BYTES*2];unsigned size=0;
+    uint32_t low[64];
+    for(unsigned i=0;i<64;++i)
+        low[i]=(table[4*i]<<2)|(table[4*i+1]<<10)|
+               (table[4*i+2]<<18)|(table[4*i+3]<<26);
+    for(unsigned high=0;high<256;++high) {
+        uint32_t repeated=table[high]*0x01010101u;
+        for(unsigned i=0;i<64;++i)pair_words[high*64+i]=low[i]|repeated;
+    }
+}
+static PREP_FAST void pack_row(const uint8_t *source,uint8_t *out)
+{
+    const uint16_t *pairs=(const uint16_t *)source;
+    const uint8_t *table=(const uint8_t *)pair_words;
+    for(unsigned x=0;x<DATA_BYTES;++x)
+        out[x]=(table[pairs[2*x]]<<4)|table[pairs[2*x+1]];
+}
+static inline uint32_t row_word(const uint8_t *p)
+{
+    uint32_t word;memcpy(&word,p,sizeof(word));return word;
+}
+static PREP_FAST unsigned encode_row(const uint8_t *raw,uint8_t *encoded)
+{
+    unsigned size=0;
     for(unsigned i=0;i<DATA_BYTES;) {
         unsigned run=1;
         while(i+run<DATA_BYTES&&raw[i+run]==raw[i]&&run<128)++run;
         if(run>=3) {
             encoded[size++]=0x80|(run-1);encoded[size++]=raw[i];i+=run;
         } else {
-            // Literal spans avoid doubling every isolated antialiasing byte.
             unsigned first=i;
             do {
+                // Test four possible three-byte runs at once. Word loads use
+                // memcpy so this is valid for unaligned literals on host too.
+                if(i+5<DATA_BYTES&&i-first<=124) {
+                    uint32_t a=row_word(raw+i),b=row_word(raw+i+1),c=row_word(raw+i+2);
+                    uint32_t unequal=(a^b)|(b^c);
+                    if(!((unequal-0x01010101u)&~unequal&0x80808080u)) {
+                        i+=4;
+                        if(i-first==128)break;
+                        continue;
+                    }
+                }
                 ++i;
                 if(i>=DATA_BYTES||i-first==128)break;
             } while(!(i+2<DATA_BYTES&&raw[i]==raw[i+1]&&raw[i]==raw[i+2]));
@@ -302,8 +353,15 @@ static int cache_row(const uint8_t *raw)
             memcpy(encoded+size,raw+first,i-first);size+=i-first;
         }
     }
+    return size;
+}
+static int cache_row(const uint8_t *raw)
+{
+    uint32_t begin=HAL_DBG_DWT_GetCycles();
+    uint8_t encoded[DATA_BYTES*2];unsigned size=encode_row(raw,encoded);
     const uint8_t *data=encoded;unsigned tag=size;
     if(size>=DATA_BYTES){data=raw;size=DATA_BYTES;tag=size|0x8000;}
+    prep_cycles[4]+=HAL_DBG_DWT_GetCycles()-begin;begin=HAL_DBG_DWT_GetCycles();
     uint32_t hash=2166136261u;
     for(unsigned i=0;i<size;++i)hash=(hash^data[i])*16777619u;
     unsigned slot=hash&(HASH_SLOTS-1);
@@ -311,7 +369,9 @@ static int cache_row(const uint8_t *raw)
         unsigned id=row_slots[slot]-1;
         const uint8_t *stored=cache_address(row_offsets[id]);
         unsigned stored_tag=stored[0]|stored[1]<<8;
-        if(stored_tag==tag&&!memcmp(stored+2,data,size))return id;
+        if(stored_tag==tag&&!memcmp(stored+2,data,size)) {
+            prep_cycles[5]+=HAL_DBG_DWT_GetCycles()-begin;return id;
+        }
         slot=(slot+1)&(HASH_SLOTS-1);
     }
     if(cached_rows>=MAX_ROWS-1)return -1;
@@ -321,67 +381,131 @@ static int cache_row(const uint8_t *raw)
        extend_cache(cache_used+size+2-CACHE_BYTES))return -1;
     unsigned id=cached_rows++;row_offsets[id]=cache_used;row_slots[slot]=id+1;
     uint8_t *out=cache_address(cache_used);out[0]=tag;out[1]=tag>>8;
-    memcpy(out+2,data,size);cache_used+=size+2;return id;
+    memcpy(out+2,data,size);cache_used+=size+2;
+    prep_cycles[5]+=HAL_DBG_DWT_GetCycles()-begin;return id;
+}
+/* A display byte represents four old/new transitions (one 32-bit input).
+ * Cache the waveform for each distinct word once, not once per row/phase.
+ * row_offsets/row_slots are temporary key/hash storage until scanning. */
+static PREP_FAST int prepare_dictionary(unsigned count)
+{
+    uint32_t start=HAL_DBG_DWT_GetCycles();
+    const uint32_t *input=(const uint32_t *)mixed;
+    uint16_t *indices=(uint16_t *)scan_cache;
+    dictionary_mode=dictionary_count=0;
+    memset(row_slots,0,sizeof(row_slots));
+    for(unsigned y=0;y<H;++y) {
+        if(preparation_cancelled())return -1;
+        for(unsigned x=0;x<DATA_BYTES;++x) {
+            unsigned at=y*DATA_BYTES+x;uint32_t word=input[at];
+            uint32_t hash=word;hash^=hash>>16;hash*=0x7feb352du;hash^=hash>>15;
+            unsigned slot=hash&(HASH_SLOTS-1),id;
+            while(row_slots[slot]&&row_offsets[row_slots[slot]-1]!=word)slot=(slot+1)&(HASH_SLOTS-1);
+            if(row_slots[slot])id=row_slots[slot]-1;
+            else {
+                if(dictionary_count>=MAX_ROWS-1)return -1;
+                id=dictionary_count++;row_offsets[id]=word;row_slots[slot]=id+1;
+            }
+            indices[at]=id;
+        }
+    }
+    prep_cycles[0]+=HAL_DBG_DWT_GetCycles()-start;
+    unsigned stride=(dictionary_count+3)&~3u;
+    if(stride>(CACHE_BYTES-DICT_INDEX_BYTES)/count)return -1;
+    for(unsigned f=0;f<count;++f) {
+        if(preparation_cancelled())return -1;
+        start=HAL_DBG_DWT_GetCycles();
+        waveform_bin_reader_fill_lut(lut,f);
+        for(unsigned i=0;i<256;++i)phase_luts[f][i]=(lut[i]>>3)&3;
+        prep_cycles[1]+=HAL_DBG_DWT_GetCycles()-start;
+        start=HAL_DBG_DWT_GetCycles();
+        uint8_t *dest=scan_cache+DICT_INDEX_BYTES+stride*f;
+        const uint8_t *table=phase_luts[f];
+        for(unsigned i=0;i<dictionary_count;++i) {
+            uint32_t word=row_offsets[i];
+            dest[i]=(table[word&255]<<6)|(table[(word>>8)&255]<<4)|
+                    (table[(word>>16)&255]<<2)|table[word>>24];
+        }
+        prep_cycles[3]+=HAL_DBG_DWT_GetCycles()-start;
+    }
+    dictionary_mode=1;raw_cache=0;cached_rows=0;
+    cache_used=DICT_INDEX_BYTES+stride*count;
+    packed_rows=dictionary_count;reused_rows=0;unique_rows=H;
+    return 0;
+}
+static int prepare_row_phases(unsigned count)
+{
+    cached_rows=cache_used=packed_rows=reused_rows=0;
+    memset(prep_cycles,0,sizeof(prep_cycles));uint32_t tick=HAL_DBG_DWT_GetCycles();
+    memset(row_slots,0,sizeof(row_slots));map_rows();
+    prep_cycles[0]+=HAL_DBG_DWT_GetCycles()-tick;
+    if(preparation_cancelled())return -1;
+    uint32_t planes[MAX_PHASES][16];
+    tick=HAL_DBG_DWT_GetCycles();
+    for(unsigned f=0;f<count;++f) {
+        waveform_bin_reader_fill_lut(lut,f);
+        memset(planes[f],0,sizeof(planes[f]));
+        for(unsigned i=0;i<256;++i) {
+            unsigned value=(lut[i]>>3)&3;phase_luts[f][i]=value;
+            if(value&1)planes[f][i>>5]|=1u<<(i&31);
+            if(value&2)planes[f][8+(i>>5)]|=1u<<(i&31);
+        }
+    }
+    prep_cycles[1]+=HAL_DBG_DWT_GetCycles()-tick;
+    for(unsigned r=0;r<unique_rows;++r) {
+        uint32_t mask[8],hashes[MAX_PHASES];
+        memcpy(mask,workspace.prep.masks[r],sizeof(mask));
+        for(unsigned f=0;f<count;++f) {
+            if(preparation_cancelled())return -1;
+            tick=HAL_DBG_DWT_GetCycles();
+            uint32_t hash=2166136261u;
+            for(unsigned i=0;i<16;++i)hash=(hash^(planes[f][i]&mask[i&7]))*16777619u;
+            hashes[f]=hash;unsigned prior;
+            for(prior=0;prior<f;++prior) {
+                if(hashes[prior]!=hash)continue;
+                unsigned i;
+                for(i=0;i<8;++i)
+                    if(((planes[f][i]^planes[prior][i])|
+                        (planes[f][i+8]^planes[prior][i+8]))&mask[i])break;
+                if(i==8)break;
+            }
+            prep_cycles[2]+=HAL_DBG_DWT_GetCycles()-tick;
+            if(prior<f) {
+                phase_rows[f][unique_y[r]]=prior;
+                ++reused_rows;continue;
+            }
+            phase_rows[f][unique_y[r]]=0xffff;
+        }
+    }
+    // Phase-major conversion uses a 64KiB SRAM LUT for two transitions at a
+    // time. Equivalence was already decided using each row's exact bit masks.
+    for(unsigned f=0;f<count;++f) {
+        tick=HAL_DBG_DWT_GetCycles();make_pair_table(phase_luts[f]);
+        prep_cycles[1]+=HAL_DBG_DWT_GetCycles()-tick;
+        for(unsigned r=0;r<unique_rows;++r) {
+            if(preparation_cancelled())return -1;
+            unsigned y=unique_y[r],prior=phase_rows[f][y];
+            if(prior!=0xffff){phase_rows[f][y]=phase_rows[prior][y];continue;}
+            ALIGN(4) uint8_t row[DATA_BYTES];
+            tick=HAL_DBG_DWT_GetCycles();pack_row(mixed+y*W,row);
+            prep_cycles[3]+=HAL_DBG_DWT_GetCycles()-tick;
+            int id=cache_row(row);if(id<0)return -1;
+            phase_rows[f][y]=id;++packed_rows;
+        }
+    }
+    // unique_y selects the first occurrence, so filling duplicates cannot
+    // overwrite a source entry. Every waveform phase still scans all 684 rows.
+    for(unsigned f=0;f<count;++f)for(unsigned y=0;y<H;++y)
+        phase_rows[f][y]=phase_rows[f][unique_y[row_map[y]]];
+    return 0;
 }
 static int prepare_phases(unsigned count)
 {
-    cached_rows=cache_used=packed_rows=reused_rows=0;
-    memset(row_slots,0,sizeof(row_slots));map_rows();
+    memset(prep_cycles,0,sizeof(prep_cycles));
+    if(!prepare_dictionary(count))return 0;
+    dictionary_mode=0;
     if(preparation_cancelled())return -1;
-    ALIGN(4) uint8_t row[DATA_BYTES];uint16_t mapping[H];
-    uint8_t relevant[256]={0};
-    uint32_t all_used[8]={0};
-    for(unsigned r=0;r<unique_rows;++r)for(unsigned i=0;i<8;++i)
-        all_used[i]|=workspace.prep.masks[r][i];
-    for(unsigned i=0;i<256;++i)relevant[i]=(all_used[i>>5]>>(i&31))&1;
-    for(unsigned f=0;f<count;++f) {
-        waveform_bin_reader_fill_lut(lut,f);
-        for(unsigned i=0;i<256;++i)lut[i]=(lut[i]>>3)&3;
-        for(unsigned i=0;i<256;++i)phase_luts[f][i]=relevant[i]?lut[i]:0;
-        uint32_t *planes=workspace.prep.planes[f];
-        memset(planes,0,16*sizeof(*planes));
-        for(unsigned i=0;i<256;++i) {
-            if(lut[i]&1)planes[i>>5]|=1u<<(i&31);
-            if(lut[i]&2)planes[8+(i>>5)]|=1u<<(i&31);
-        }
-        unsigned prior;
-        for(prior=0;prior<f;++prior)if(!memcmp(phase_luts[prior],phase_luts[f],256))break;
-        if(prior<f) {
-            memcpy(phase_rows[f],phase_rows[prior],sizeof(phase_rows[f]));
-            memcpy(workspace.prep.hashes[f],workspace.prep.hashes[prior],unique_rows*sizeof(uint32_t));
-            reused_rows+=unique_rows;continue;
-        }
-        for(unsigned r=0;r<unique_rows;++r) {
-            if(preparation_cancelled())return -1;
-            const uint32_t *mask=workspace.prep.masks[r];
-            uint32_t hash=2166136261u;
-            for(unsigned i=0;i<16;++i)hash=(hash^(planes[i]&mask[i&7]))*16777619u;
-            workspace.prep.hashes[f][r]=hash;
-            /* Matching hash is only a filter: verify both output bitplanes
-             * for every transition that actually occurs in this input row. */
-            for(prior=0;prior<f;++prior) {
-                if(workspace.prep.hashes[prior][r]!=hash)continue;
-                const uint32_t *other=workspace.prep.planes[prior];unsigned i;
-                for(i=0;i<8;++i)
-                    if(((planes[i]^other[i])|(planes[i+8]^other[i+8]))&mask[i])break;
-                if(i==8)break;
-            }
-            if(prior<f) {
-                mapping[r]=phase_rows[prior][unique_y[r]];++reused_rows;continue;
-            }
-            const uint32_t *m=(const uint32_t *)(mixed+unique_y[r]*W);
-            for(unsigned x=0;x<DATA_BYTES;++x) {
-                /* Keep the small LUT in internal SRAM. A 64KiB pair table
-                 * in PSRAM causes scattered external-memory reads. */
-                uint32_t v=m[x];
-                row[x]=(lut[v&255]<<6)|(lut[(v>>8)&255]<<4)|
-                       (lut[(v>>16)&255]<<2)|lut[v>>24];
-            }
-            int id=cache_row(row);if(id<0)return -1;mapping[r]=id;++packed_rows;
-        }
-        for(unsigned y=0;y<H;++y)phase_rows[f][y]=mapping[row_map[y]];
-    }
-    return 0;
+    return prepare_row_phases(count);
 }
 static void expand_row(const uint8_t *in,uint8_t *out)
 {
@@ -399,6 +523,8 @@ static void expand_row(const uint8_t *in,uint8_t *out)
 }
 static void promote_raw_cache(void)
 {
+    if(dictionary_mode){raw_cache=0;return;}
+    uint32_t begin=HAL_DBG_DWT_GetCycles();
     unsigned base_rows=CACHE_BYTES/ROW_BYTES;
     if(cached_rows>base_rows)extend_cache((cached_rows-base_rows)*ROW_BYTES);
     raw_cache=cached_rows<=base_rows+extra_bytes/ROW_BYTES;
@@ -416,9 +542,30 @@ static void promote_raw_cache(void)
     }
     mpu_dcache_clean(scan_cache,(cached_rows<base_rows?cached_rows:base_rows)*ROW_BYTES);
     if(cached_rows>base_rows)mpu_dcache_clean(extra_cache,(cached_rows-base_rows)*ROW_BYTES);
+    prep_cycles[6]+=HAL_DBG_DWT_GetCycles()-begin;
+}
+static PREP_FAST void expand_dictionary_phase(unsigned phase)
+{
+    unsigned stride=(dictionary_count+3)&~3u;
+    /* The per-phase byte table fits in internal SRAM. External memory traffic
+     * is then sequential index reads and complete-frame writes. */
+    uint8_t *table=(uint8_t *)pair_words;
+    memcpy(table,scan_cache+DICT_INDEX_BYTES+stride*phase,dictionary_count);
+    const uint16_t *indices=(const uint16_t *)scan_cache;
+    for(unsigned y=0;y<H;++y) {
+        uint32_t *out=(uint32_t *)(full_frame+y*ROW_BYTES);
+        for(unsigned x=0;x<DATA_BYTES;x+=4) {
+            *out++=table[indices[0]]|((uint32_t)table[indices[1]]<<8)|
+                ((uint32_t)table[indices[2]]<<16)|((uint32_t)table[indices[3]]<<24);
+            indices+=4;
+        }
+        out[0]=out[1]=out[2]=0;
+    }
+    mpu_dcache_clean(full_frame,sizeof(full_frame));
 }
 static void expand_phase(unsigned phase)
 {
+    if(dictionary_mode){expand_dictionary_phase(phase);return;}
     for(unsigned y=0;y<H;++y) {
         const uint8_t *in=cache_address(row_offsets[phase_rows[phase][y]]);
         expand_row(in,full_frame+y*ROW_BYTES);
@@ -432,20 +579,20 @@ static int drive(unsigned mode)
     unsigned count=hit?prepared_count:waveform_bin_reader_get_frames(temperature,(WAVE_TABLE_MODE_T)mode);
     prepared=0;
     if(!count||count>MAX_PHASES)return -1;
-    uint32_t begin=rt_tick_get(),scan_cycles=0,expand_cycles=0,visible_ms=0;unsigned done=0;
+    uint32_t begin=rt_tick_get(),scan_cycles=0,expand_cycles=0,visible_ms=0,first_scan_ms=0;unsigned done=0;
     if(!hit&&prepare_phases(count)) {
         ++errors;rt_kprintf("EPD527_CACHE_FULL HV=OFF rows=%u bytes=%u\n",cached_rows,cache_used);
         release_extra_cache();return -RT_ENOMEM;
     }
-    if(!hit)promote_raw_cache();unsigned prep_ms=rt_tick_get()-begin;
+    if(!hit){promote_raw_cache();report_preparation();}unsigned prep_ms=rt_tick_get()-begin;
     memset(full_frame,0,sizeof(full_frame));aborted=0;
     rt_timer_start(&cutoff);
     if(tps_exit_sleep()!=RT_EOK){aborted=1;goto cleanup;}
-    unsigned first_scan_ms=rt_tick_get()-begin;
     for(unsigned f=0;f<count;++f) {
         active_phase=f;
         uint32_t tick=HAL_DBG_DWT_GetCycles();if(!raw_cache)expand_phase(f);
         expand_cycles+=HAL_DBG_DWT_GetCycles()-tick;
+        if(f==0)first_scan_ms=rt_tick_get()-begin;
         tick=HAL_DBG_DWT_GetCycles();
         rt_enter_critical();int rc=scan_frame();rt_exit_critical();
         scan_cycles+=HAL_DBG_DWT_GetCycles()-tick;
@@ -465,6 +612,7 @@ cleanup:
     rt_kprintf("EPD527_REUSE packed_rows=%u reused_rows=%u\n",packed_rows,reused_rows);
     rt_kprintf("EPD527_TIMING visible_ms=%u discharge_guard_ms=450\n",visible_ms);
     rt_kprintf("EPD527_MEMORY borrowed=%u released=1\n",borrowed);
+    rt_kprintf("EPD527_DICTIONARY enabled=%u words=%u\n",dictionary_mode,dictionary_count);
     rt_kprintf("EPD527_PREFETCH hit=%u saved_ms=%u first_scan_ms=%u\n",hit,saved_ms,first_scan_ms);
     return 0;
 }
@@ -516,6 +664,7 @@ int board527_display_prepare(const uint8_t *gray4,int (*cancel)(void *),void *co
     }
     prepare_cancel=RT_NULL;prepare_context=RT_NULL;prepare_cancelled=0;
     prepared_ms=rt_tick_get()-begin;prepared_index=refresh_index;
+    report_preparation();
     if(rc)discard_prepared();
     rt_kprintf("EPD527_PREPARED ready=%u ms=%u raw=%u borrowed=%u HV=OFF\n",!rc,prepared_ms,raw_cache,extra_bytes);
     rt_mutex_release(&lock);return rc;
