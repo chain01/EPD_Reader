@@ -66,11 +66,14 @@ public:
   // 后台排版（主循环空闲时调用）
   bool continue_layout();
   bool has_pending_layout();
+  bool has_pending_preview() const { return !overlay_active && !preview_attempted; }
 
   // 保存当前阅读位置的锚点（进入设置前调用）
+  void pause_background();
+  void reflow_by_anchor(int block_index, int line_index);
   void save_anchor(int &out_block_index, int &out_line_index);
 
-  // 字体/排版变更后，根据锚点重新定位页码（排完全部后调用）
+  // 字体/排版变更后，根据锚点排到目标页，其余继续后台排版
   void restore_by_anchor(int block_index, int line_index);
 
   // 覆盖层控制

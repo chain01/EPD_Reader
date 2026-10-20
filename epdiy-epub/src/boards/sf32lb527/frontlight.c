@@ -15,6 +15,7 @@
 #define MAX_CODE 150u
 static struct rt_i2c_bus_device *bus;
 static struct rt_mutex lock;
+static struct rt_semaphore monitor_sem;
 static unsigned started,ready,level_a,level_b,sets,errors,checks,generation;
 static uint8_t revision,irq_latched,fault_latched,startup_irq;
 
@@ -188,7 +189,7 @@ static void monitor(void *arg)
 {
     (void)arg;
     while(1) {
-        rt_thread_mdelay(500);
+        rt_sem_take(&monitor_sem,(level_a||level_b)?rt_tick_from_millisecond(500):RT_WAITING_FOREVER);
         rt_mutex_take(&lock,RT_WAITING_FOREVER);
         if(ready) {
             if(!rt_pin_read(3)||generation!=board_expander_generation())fail_off("expander_reset");
@@ -220,12 +221,14 @@ static int fl(int argc,char **argv)
         else if(!strcmp(argv[1],"both"))rc=set_levels(p,p);
     }
     if(rc==-RT_EINVAL)rt_kprintf("fl probe | status | off | a/b/both <0..100> | set <A%%> <B%%>\n");
+    rt_sem_release(&monitor_sem);
     rt_mutex_release(&lock);return rc;
 }
 MSH_CMD_EXPORT(fl, LM3630A frontlight control);
 int frontlight_start(void)
 {
     rt_mutex_init(&lock,"fllock",RT_IPC_FLAG_PRIO);
+    rt_sem_init(&monitor_sem,"flmon",0,RT_IPC_FLAG_FIFO);
     if(hard_off())return -RT_ERROR;
     rt_thread_t tid=rt_thread_create("flcheck",monitor,RT_NULL,2048,19,10);
     if(!tid)return -RT_ENOMEM;
@@ -239,7 +242,7 @@ void frontlight_display_unlock(void){if(started)rt_mutex_release(&lock);}
 int board527_frontlight_set(unsigned cold,unsigned warm)
 {
     if(!started)return -RT_ENOSYS;
-    rt_mutex_take(&lock,RT_WAITING_FOREVER);int rc=set_levels(cold,warm);rt_mutex_release(&lock);return rc;
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);int rc=set_levels(cold,warm);rt_sem_release(&monitor_sem);rt_mutex_release(&lock);return rc;
 }
 void board527_frontlight_get(unsigned *cold,unsigned *warm)
 {

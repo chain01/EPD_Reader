@@ -14,6 +14,7 @@ extern AppUIState ui_state;
 extern EpubListState epub_list_state;
 extern void handleUserInteraction(Renderer *,UIAction,bool);
 extern void back_to_main_page();
+extern void reader527_reading_settings_open(Renderer *);
 enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER};
 static void dump_frame(void)
 {
@@ -42,7 +43,7 @@ bool reader527_debug_message(uint32_t msg,Renderer *r)
     else if(msg==DEBUG_LIBRARY)ui_state=SELECTING_EPUB;
     else if(msg==DEBUG_SETTINGS)ui_state=SETTINGS_PAGE;
     else if(msg==DEBUG_LIGHT)ui_state=FRONTLIGHT_PAGE;
-    else if(msg==DEBUG_READING){ui_state=READING_SETTINGS;reading_settings_draw(r);}
+    else if(msg==DEBUG_READING){reader527_reading_settings_open(r);}
     else if(msg==DEBUG_DFU)ui_state=USB_DFU_PAGE;
     handleUserInteraction(r,NONE,true);r->flush_display();
     rt_kprintf("UI_DEBUG_DONE state=%u\n",(unsigned)ui_state);return true;

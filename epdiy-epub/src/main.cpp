@@ -14,6 +14,7 @@
 #include "epd_driver.h"
 #include "type.h"
 #include "reading_settings.h"
+#include "reader_power.h"
 #include "ulog.h"
 #include "UIRegionsManager.h"
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
@@ -101,6 +102,19 @@ void draw_bluetooth_status(Renderer *renderer, bool enabled, bool connected);
 
 static EpubList *epub_list = nullptr;
 EpubReader *reader = nullptr;
+
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+void reader527_reading_settings_open(Renderer *r)
+{
+    g_state_before_settings = ui_state == READING_EPUB ? READING_EPUB : SETTINGS_PAGE;
+    g_has_anchor = reader && ui_state == READING_EPUB;
+    if (g_has_anchor) reader->save_anchor(g_anchor_block, g_anchor_line);
+    else if (reader) reader->pause_background();
+    reading_settings_set_current_item(0);
+    ui_state = READING_SETTINGS;
+    reading_settings_draw(r);
+}
+#endif
 static EpubToc *contents = nullptr;
 static bool charge_full = false;
 Battery *battery = nullptr;
@@ -828,20 +842,16 @@ void handleUserInteraction(Renderer *renderer, UIAction ui_action, bool needs_re
         break;
     case READING_SETTINGS:
     {
+        if (reader) reader->pause_background();
         bool still_in_settings = reading_settings_handle_action(renderer, ui_action);
         if (!still_in_settings) {
             if (g_state_before_settings == READING_EPUB) {
                 // 从阅读页的覆盖层进入的 → 回到阅读页
                 ui_state = READING_EPUB;
-                delete reader;
-                reader = nullptr;
-                handleEpub(renderer, NONE);
-                // 用锚点恢复阅读位置
-                if (g_has_anchor && reader) {
-                    reader->restore_by_anchor(g_anchor_block, g_anchor_line);
-                    reader->render();
+                if (reader && g_has_anchor) {
+                    reader->reflow_by_anchor(g_anchor_block, g_anchor_line);
                     g_has_anchor = false;
-                }
+                } else handleEpub(renderer, NONE);
             } else {
                 // 从主界面设置页进入的 → 回到设置页
                 ui_state = SETTINGS_PAGE;
@@ -1116,10 +1126,24 @@ void main_task(void *param)
       draw_welcome_page(battery);      
     }
     uint32_t msg_data;
-    if (rt_mq_recv(ui_queue, &msg_data, sizeof(uint32_t), rt_tick_from_millisecond(500)) == RT_EOK)
+    int wait_ms = 500;
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+    if (!epd_font_ft_preheat_is_running() &&
+        !(ui_state==READING_EPUB && reader &&
+          (reader->has_pending_layout() || reader->has_pending_preview()))) wait_ms = 5000;
+    reader_power_idle();
+#endif
+    int message_result = rt_mq_recv(ui_queue, &msg_data, sizeof(uint32_t), rt_tick_from_millisecond(wait_ms));
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+    reader_power_busy();
+#endif
+    if (message_result == RT_EOK)
     {
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
-      if(reader527_debug_message(msg_data,renderer))continue;
+      if(reader527_debug_message(msg_data,renderer)) {
+          last_user_interaction = rt_tick_get_millisecond();
+          continue;
+      }
 #endif
       UIAction ui_action = (UIAction)msg_data;
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
@@ -1358,7 +1382,9 @@ void main_task(void *param)
       }
     }
     // 每次主循环迭代末尾短暂延时，给予低优先级线程机会运行，避免互相饿死
+#ifndef BSP_USING_BOARD_SF32LB527_OED_E0470A03
     rt_thread_mdelay(50);
+#endif
   }
 
   ulog_i("main", "Saving state");

@@ -42,6 +42,8 @@ jobs:
       run: |
         python3 tools/test_527_cache.py
         python3 tools/test_settings_save.py
+        python3 tools/test_font_io.py
+        python3 tools/test_reader_reflow.py
         python3 tools/test_527_dfu.py
         python3 tools/test_527_dfu_package.py
         

@@ -257,6 +257,9 @@ void RubbishHtmlParser::layout(Renderer *renderer, Epub *epub, int target_pages)
     m_layout_done = false;
 
     rt_mutex_take(m_pages_mutex, RT_WAITING_FOREVER);
+    // Reflow a retained chapter after font/geometry changes without ZIP/XML I/O.
+    for (auto page : pages) delete page;
+    pages.clear();
     pages.push_back(new Page());
     rt_mutex_release(m_pages_mutex);
 
@@ -454,5 +457,5 @@ int RubbishHtmlParser::find_page_by_anchor(const PageAnchor &anchor)
   }
 
   rt_mutex_release(m_pages_mutex);
-  return 0;  // 没找到，回到第 0 页
+  return -1; // Not in the laid-out prefix yet; caller can extend it incrementally.
 }

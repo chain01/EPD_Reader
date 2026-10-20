@@ -84,7 +84,8 @@ static void worker(void *arg)
 {
     (void)arg;unsigned consecutive=0;
     while(1) {
-        int wake=rt_sem_take(&sem,rt_tick_from_millisecond(20));
+        /* Poll only during an active gesture to recover a missed release. */
+        int wake=rt_sem_take(&sem,tracker.active?rt_tick_from_millisecond(20):RT_WAITING_FOREVER);
         rt_mutex_take(&lock,RT_WAITING_FOREVER);
         if(ready && (aw_gen!=board_expander_generation()||!rt_pin_read(3)))disable();
         if(ready && (wake==RT_EOK||tracker.active)) {

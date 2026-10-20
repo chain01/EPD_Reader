@@ -58,13 +58,15 @@ Before first installation, read and verify the complete 16MiB NOR, not only the 
 - The library uses `/books` when that directory exists, otherwise `/`. Home, settings and cold/warm frontlight controls use the 684×1216 portrait dimensions. Touch hit regions account for renderer margins.
 - Display refresh serializes touch, frontlight checks and diagnostic TF operations. Hardware protection remains enabled. Input during a full refresh can be delayed or coalesced.
 
-Battery/charger routing, physical keys and deep-sleep wake routing have not been validated on this board. The BSP does not reuse old-board ADC/key assignments. Bluetooth/PAN and weather code are retained but require separate end-to-end validation with a phone/network.
+The new board automatically enters retained deep sleep while waiting for input after background work finishes. Touch IRQ PA44 is configured as AON PIN20; touch and frontlight supply rails remain stable. The CPU and memory sleep/resume path has been exercised on hardware; physical touch-wake acceptance and whole-board current measurements remain pending. Battery/charger routing and physical keys have not been validated. The BSP does not reuse old-board ADC/key assignments. Bluetooth/PAN and weather code are retained but require separate end-to-end validation with a phone/network.
 
 The recovery boot path now uses the original firmware's PA34 active-high power-key definition; it does not enable the reader's general button/ADC driver. USB recovery is also available from Settings, and is selected automatically after interrupted updates or failed image checks.
 
 ## Validation status
 
 See [hardware and build validation](VALIDATION_SF32LB527.md) for measured results and limits.
+
+See [font switching and idle sleep](VALIDATION_FONT_POWER_527.md) for bounded PSRAM font caching, retained-chapter reflow, measured switch times, sleep statistics and UART diagnostic limits.
 
 `python tools/test_527_cache.py` requires a host GCC. It replays the actual C cache routines against GC16, DU, INIT and GL16 at the configured temperature, compares every packed output byte, checks bounded overflow, and verifies the cleaning-interval policy. Hardware optical checks remain necessary for ghosting and gray quality.
 

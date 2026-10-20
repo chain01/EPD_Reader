@@ -20,19 +20,21 @@ void BSP_GPIO_Set(int pin, int val, int is_porta)
 
 __WEAK void BSP_PowerDownCustom(int coreid, bool is_deep_sleep)
 {
-    HAL_PMU_ConfigPeriLdo(PMU_PERI_LDO3_3V3, /*enable=*/false, /*wait=*/true);//VDD33_VOUT2
+    /* Keep touch, AW9523B and frontlight rails stable across retained sleep. */
+    (void)coreid; (void)is_deep_sleep;
 
 }
 
 __WEAK void BSP_PowerUpCustom(bool is_deep_sleep)
 {
-   HAL_PMU_ConfigPeriLdo(PMU_PERI_LDO3_3V3, /*enable=*/true, /*wait=*/true);//VDD33_VOUT2
+    /* Cold boot still establishes LDO3; retained sleep never switches it off. */
+    if (is_deep_sleep) HAL_PMU_ConfigPeriLdo(PMU_PERI_LDO3_3V3, true, true);
 
 }
 
 void PowerDownCustom(void)
 {
-    /* Logical idle only until board wake routing is verified. */
+    /* HCPU retained sleep uses BSP_IO_Power_Down/BSP_Power_Up below. */
 }
 
 extern void *rt_flash_get_handle_by_addr(uint32_t addr);
