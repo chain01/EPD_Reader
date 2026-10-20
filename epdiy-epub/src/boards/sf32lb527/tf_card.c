@@ -6,6 +6,7 @@
 #include <rtdevice.h>
 #include <finsh.h>
 #include <dfs_fs.h>
+#include <dfs_file.h>
 #include <dfs_posix.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -269,4 +270,31 @@ int board527_storage_mount(void)
 {
     if(!started){rt_mutex_init(&lock,"tflock",RT_IPC_FLAG_PRIO);started=1;}
     rt_mutex_take(&lock,RT_WAITING_FOREVER);int rc=initialize();rt_mutex_release(&lock);return rc;
+}
+
+int board527_storage_test_begin(void)
+{
+    if(!started)return -RT_ENOSYS;
+    tf_card_display_lock();
+    dfs_lock();
+    struct dfs_filesystem *fs=dfs_filesystem_lookup("/");
+    struct dfs_fdtable *table=dfs_fdtable_get();
+    int busy=0;
+    for(unsigned i=0;i<table->maxfd;++i) {
+        struct dfs_fd *fd=table->fds[i];
+        if(fs&&fd&&fd->ref_count>0&&fd->fs==fs){busy=1;break;}
+    }
+    if(busy||unmount_card()) {
+        dfs_unlock();tf_card_display_unlock();return -RT_EBUSY;
+    }
+    ready=0;
+    /* UI owns the locks until remount; diagnostics/background opens cannot
+     * touch the unpowered card. No user data is written or formatted. */
+    return 0;
+}
+int board527_storage_test_end(void)
+{
+    int rc=initialize();
+    dfs_unlock();tf_card_display_unlock();
+    return rc;
 }

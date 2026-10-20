@@ -116,6 +116,14 @@ void reader527_reading_settings_open(Renderer *r)
 }
 #endif
 static EpubToc *contents = nullptr;
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+void reader527_close_book_for_power_test()
+{
+    if(reader){delete reader;reader=nullptr;}
+    if(contents){delete contents;contents=nullptr;}
+    g_has_anchor=false;
+}
+#endif
 static bool charge_full = false;
 Battery *battery = nullptr;
 // 给open_tp_lcd和close_tp_lcd用的

@@ -28,6 +28,12 @@ static void test_finished(void *arg)
     diagnostic_hold(1);
 }
 
+void board527_power_auto(void)
+{
+    rt_timer_stop(&test_timer);
+    diagnostic_hold(0);
+}
+
 static void notify(uint8_t event, uint8_t mode, void *data)
 {
     (void)data;
@@ -60,6 +66,13 @@ MSH_CMD_EXPORT(pwr, Idle deep sleep: status / on / off / test [10 seconds then a
 
 int board527_power_init(void)
 {
+    if(SystemPowerOnModeGet()==PM_HIBERNATE_BOOT) {
+        /* The diagnostic WUT must not keep interrupting after its reboot. */
+        RTC_HandleTypeDef rtc={0};rtc.Instance=hwp_rtc;
+        HAL_RTC_DeactivateWakeUpTimer(&rtc);
+        HAL_PMU_DisableRtcWakeup();
+        rt_kprintf("MINPOWER_HIBERNATE_WAKE rtc_test_timer_disabled=1\n");
+    }
     /* PA44 is HPAON PIN20 on SF32LB52x. Keep its GPIO IRQ enabled as well. */
     int rc = pm_enable_pin_wakeup(20, AON_PIN_MODE_NEG_EDGE);
     if (rc) return rc;
@@ -71,4 +84,5 @@ int board527_power_init(void)
 }
 #else
 int board527_power_init(void) { return 0; }
+void board527_power_auto(void) {}
 #endif

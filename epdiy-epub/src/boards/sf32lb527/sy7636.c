@@ -78,6 +78,72 @@ int board_frontlight_gpio_report(void)
     return rc;
 }
 unsigned board_expander_generation(void) { return aw_generation; }
+static uint8_t test_p1_out,test_p1_dir;
+static int test_rail_saved;
+static uint8_t test_amp_out,test_amp_dir;
+static int test_amp_saved;
+int board527_amplifier_report(void)
+{
+    uint8_t input=0,output=0,dir=0;
+    rt_mutex_take(&aw_lock,RT_WAITING_FOREVER);
+    int rc=reg_read(aw_bus,0x59,0,&input)|reg_read(aw_bus,0x59,2,&output)|reg_read(aw_bus,0x59,4,&dir);
+    rt_kprintf("AMP_STATUS rc=%d GE7_actual=%u latch=%u input_mode=%u\n",rc,(input>>7)&1,(output>>7)&1,(dir>>7)&1);
+    rt_mutex_release(&aw_lock);return rc;
+}
+int board527_amplifier_test(int mute)
+{
+    uint8_t output=0,dir=0;int rc=-RT_ERROR;
+    if(!aw_ready||!rt_pin_read(3))return rc;
+    rt_mutex_take(&aw_lock,RT_WAITING_FOREVER);
+    if(reg_read(aw_bus,0x59,2,&output)||reg_read(aw_bus,0x59,4,&dir))goto amp_done;
+    if(mute) {
+        if(!test_amp_saved){test_amp_out=output&0x80;test_amp_dir=dir&0x80;test_amp_saved=1;}
+        // Original PA control at 0x12203fc0: pin1007 output, level=!mute.
+        rc=reg_write(aw_bus,0x59,2,output&0x7f)|reg_write(aw_bus,0x59,4,dir&0x7f);
+    } else if(test_amp_saved) {
+        rc=reg_write(aw_bus,0x59,2,(output&0x7f)|test_amp_out)|reg_write(aw_bus,0x59,4,(dir&0x7f)|test_amp_dir);
+        if(!rc)test_amp_saved=0;
+    } else rc=0;
+amp_done:
+    rt_mutex_release(&aw_lock);board527_amplifier_report();return rc;
+}
+int board527_logic_rail_test(int off)
+{
+    int rc=0;uint8_t inputs=0;
+    if(!aw_ready||!rt_pin_read(3)||powered||configured)return -RT_EBUSY;
+    rt_mutex_take(&aw_lock,RT_WAITING_FOREVER);
+    if(off) {
+        if(test_rail_saved){rc=-RT_EBUSY;goto done;}
+        if(reg_read(aw_bus,0x59,3,&test_p1_out)||reg_read(aw_bus,0x59,5,&test_p1_dir)) {rc=-RT_ERROR;goto done;}
+        test_rail_saved=1;
+        /* Original main firmware cuts GE15/GE14 for GUI sleep. Keep AW and
+         * all other outputs alive; snapshot direction as GE15 was an input. */
+        rc=reg_write(aw_bus,0x59,3,test_p1_out&~0xc0)|reg_write(aw_bus,0x59,5,test_p1_dir&~0xc0);
+    } else if(test_rail_saved) {
+        rc=reg_write(aw_bus,0x59,3,test_p1_out)|reg_write(aw_bus,0x59,5,test_p1_dir);
+        if(!rc)test_rail_saved=0;
+    }
+    rc|=reg_read(aw_bus,0x59,1,&inputs);
+    rt_kprintf("PWR_LOGIC_RAIL off=%d rc=%d GE14=%u GE15=%u\n",off,rc,(inputs>>6)&1,(inputs>>7)&1);
+done:
+    rt_mutex_release(&aw_lock);return rc;
+}
+
+int board527_minimum_external_off(void)
+{
+    uint8_t in0=0,in1=0;
+    if(!aw_ready||powered||configured)return -RT_EBUSY;
+    rt_mutex_take(&aw_lock,RT_WAITING_FOREVER);
+    /* Clear latches BEFORE selecting output. All mapped enables/reset lines:
+     * GE3/11 frontlight, GE4/6 panel HV, GE7 amplifier, GE12 Wi-Fi reset,
+     * GE13 touch reset, GE14 common 3V3, GE15 Wi-Fi power. */
+    int rc=reg_write(aw_bus,0x59,2,0)|reg_write(aw_bus,0x59,3,0)|
+           reg_write(aw_bus,0x59,4,0x27)|reg_write(aw_bus,0x59,5,0x07);
+    rc|=reg_read(aw_bus,0x59,0,&in0)|reg_read(aw_bus,0x59,1,&in1);
+    if((in0&0xd8)||(in1&0xf8))rc=-RT_ERROR;
+    rt_kprintf("MINPOWER_AW enables_low=%d P0=%02x P1=%02x rc=%d\n",!rc,in0,in1,rc);
+    rt_mutex_release(&aw_lock);return rc;
+}
 int board_touch_gpio_report(void)
 {
     uint8_t in=0,out=0,dir=0,mode=0;

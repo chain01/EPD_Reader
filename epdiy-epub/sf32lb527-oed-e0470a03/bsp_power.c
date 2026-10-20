@@ -94,4 +94,49 @@ void BSP_SDIO_Power_Down(void)
 #endif
 }
 
+/* This entire object and all called HAL/Flash entry points are in internal
+ * SRAM. Nothing after Flash DPD may execute or fetch constants from XIP. */
+#if defined(SOC_BF0_HCPU) && defined(RT_USING_PM)
+void board527_minimum_park_buses(void)
+{
+    for(unsigned n=0;n<=44;++n) {
+        // Keep NOR/UART, AW I2C/reset, touch power low and wake key available.
+        if(n==3||(n>=12&&n<=20)||n==30||n==32||n==34)continue;
+        GPIO_InitTypeDef cfg={.Pin=n,.Mode=GPIO_MODE_INPUT,.Pull=GPIO_NOPULL};
+        HAL_GPIO_Init(hwp_gpio1,&cfg);
+        HAL_PIN_Set_Analog(PAD_PA00+n,1);
+    }
+}
+
+__attribute__((noreturn)) void board527_minimum_hibernate(void)
+{
+    HAL_DisableInterrupt();
+    SysTick->CTRL=0;
+    SCB_CleanDCache();__DSB();
+    FLASH_HandleTypeDef *flash=(FLASH_HandleTypeDef *)rt_flash_get_handle_by_addr(MPI2_MEM_BASE);
+    bsp_psram_enter_low_power("psram1");
+    HAL_FLASH_DEEP_PWRDOWN(flash);HAL_Delay_us(10);
+
+    /* All external buses, audio, USB and UART are high-Z/no pull. PA3 keeps
+     * AW in reset and PA32 holds the touch switch off until pads power down. */
+    for(unsigned n=0;n<=44;++n) {
+        GPIO_InitTypeDef cfg={.Pin=n,.Mode=GPIO_MODE_INPUT,.Pull=GPIO_NOPULL};
+        HAL_GPIO_Init(hwp_gpio1,&cfg);
+        HAL_PIN_Set_Analog(PAD_PA00+n,1);
+    }
+    HAL_PIN_Set(PAD_PA03,GPIO_A3,PIN_NOPULL,1);BSP_GPIO_Set(3,0,1);
+    HAL_PIN_Set(PAD_PA32,GPIO_A32,PIN_NOPULL,1);BSP_GPIO_Set(32,0,1);
+    HAL_PIN_Set(PAD_PA34,GPIO_A34,PIN_PULLDOWN,1); // PMU power-key wake only.
+    for(unsigned pad=PAD_SA00;pad<=PAD_SA12;++pad)HAL_PIN_Set_Analog(pad,1);
+    __DSB();
+
+    /* No PSRAM retention is needed: Hibernate always boots from reset. The
+     * SDK Hibernate entry also disables LDO2 and resets/stops the LCPU. */
+    HAL_PMU_ConfigPeriLdo(PMU_PERI_LDO3_3V3,false,false);
+    HAL_PMU_ConfigPeriLdo(PMU_PERI_LDO_1V8,false,false);
+    HAL_PMU_EnterHibernate();
+    while(1){};
+}
+#endif
+
 

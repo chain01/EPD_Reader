@@ -15,7 +15,12 @@ extern EpubListState epub_list_state;
 extern void handleUserInteraction(Renderer *,UIAction,bool);
 extern void back_to_main_page();
 extern void reader527_reading_settings_open(Renderer *);
-enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER};
+extern int reader527_power_measure(Renderer *,int);
+extern int reader527_lcpu_measure(Renderer *,int);
+extern int reader527_rail_measure(Renderer *,int);
+extern int reader527_amp_measure(Renderer *,int);
+extern int reader527_minimum_power(Renderer *,bool);
+enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER,DEBUG_POWER,DEBUG_POWER_QUICK,DEBUG_LCPU,DEBUG_LCPU_QUICK,DEBUG_RAIL,DEBUG_RAIL_QUICK,DEBUG_AMP,DEBUG_AMP_QUICK,DEBUG_MINIMUM,DEBUG_MINIMUM_TEST};
 static void dump_frame(void)
 {
     const uint8_t *frame=board527_framebuffer();const unsigned size=1216*684/2;
@@ -32,7 +37,30 @@ static void dump_frame(void)
 }
 bool reader527_debug_message(uint32_t msg,Renderer *r)
 {
-    if(msg<DEBUG_HOME||msg>DEBUG_DFU_ENTER)return false;
+    if(msg<DEBUG_HOME||msg>DEBUG_MINIMUM_TEST)return false;
+    if(msg==DEBUG_MINIMUM||msg==DEBUG_MINIMUM_TEST) {
+        reader527_minimum_power(r,msg==DEBUG_MINIMUM_TEST);return true;
+    }
+    if(msg==DEBUG_AMP||msg==DEBUG_AMP_QUICK) {
+        if(reader527_amp_measure(r,msg==DEBUG_AMP?120:5))return true;
+        ui_state=MAIN_PAGE;handleUserInteraction(r,NONE,true);r->flush_display();
+        rt_kprintf("UI_DEBUG_DONE state=%u\n",(unsigned)ui_state);return true;
+    }
+    if(msg==DEBUG_RAIL||msg==DEBUG_RAIL_QUICK) {
+        if(reader527_rail_measure(r,msg==DEBUG_RAIL?120:5))return true;
+        ui_state=MAIN_PAGE;handleUserInteraction(r,NONE,true);r->flush_display();
+        rt_kprintf("UI_DEBUG_DONE state=%u\n",(unsigned)ui_state);return true;
+    }
+    if(msg==DEBUG_LCPU||msg==DEBUG_LCPU_QUICK) {
+        if(reader527_lcpu_measure(r,msg==DEBUG_LCPU?120:5))return true;
+        ui_state=MAIN_PAGE;handleUserInteraction(r,NONE,true);r->flush_display();
+        rt_kprintf("UI_DEBUG_DONE state=%u\n",(unsigned)ui_state);return true;
+    }
+    if(msg==DEBUG_POWER||msg==DEBUG_POWER_QUICK) {
+        if(reader527_power_measure(r,msg==DEBUG_POWER?120:5))return true;
+        ui_state=MAIN_PAGE;handleUserInteraction(r,NONE,true);r->flush_display();
+        rt_kprintf("UI_DEBUG_DONE state=%u\n",(unsigned)ui_state);return true;
+    }
     if(msg==DEBUG_DUMP){dump_frame();return true;}
     if(msg==DEBUG_DFU_ENTER) {
         if(ui_state==USB_DFU_PAGE){reader527_dfu_hit=0;handleUserInteraction(r,SELECT,false);}
@@ -66,8 +94,8 @@ static int ui(int argc,char **argv)
         return 0;
     }
     if(argc==2) {
-        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter"};
-        for(unsigned n=0;n<8;++n)if(!strcmp(argv[1],names[n])) {
+        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter","power","power-quick","lp-power","lp-power-quick","rail-power","rail-power-quick","amp-power","amp-power-quick","min-power","min-power-test"};
+        for(unsigned n=0;n<18;++n)if(!strcmp(argv[1],names[n])) {
             uint32_t msg=DEBUG_HOME+n;return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
         const char *actions[]={"prev","next","select","menu"};
@@ -76,6 +104,6 @@ static int ui(int argc,char **argv)
             uint32_t msg=values[n];return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
     }
-    rt_kprintf("ui home/library/settings/light/reading/dump/dfu/dfu-enter/status/prev/next/select/menu\n");return -RT_EINVAL;
+    rt_kprintf("ui home/library/settings/light/reading/dump/dfu/dfu-enter/power/power-quick/lp-power/lp-power-quick/rail-power/rail-power-quick/amp-power/amp-power-quick/min-power/min-power-test/status/prev/next/select/menu\n");return -RT_EINVAL;
 }
 MSH_CMD_EXPORT(ui, Reader UI diagnostics);

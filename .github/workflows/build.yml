@@ -44,6 +44,9 @@ jobs:
         python3 tools/test_settings_save.py
         python3 tools/test_font_io.py
         python3 tools/test_reader_reflow.py
+        python3 tools/test_527_power_measure.py
+        python3 tools/test_527_lcpu_sleep.py
+        python3 tools/test_527_minimum_power.py
         python3 tools/test_527_dfu.py
         python3 tools/test_527_dfu_package.py
         

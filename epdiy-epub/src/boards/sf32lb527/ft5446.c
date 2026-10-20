@@ -5,6 +5,7 @@
 #include <rtthread.h>
 #include <rtdevice.h>
 #include <finsh.h>
+#include <string.h>
 #include "board.h"
 #include "board527.h"
 #include "drv_touch.h"
@@ -105,7 +106,15 @@ static void worker(void *arg)
 }
 static int tp(int argc,char **argv)
 {
-    (void)argc;(void)argv;
+    if(argc==2 && !strcmp(argv[1],"regs")) {
+        const uint8_t regs[]={0x00,0x86,0x87,0x88,0x89,0xa3,0xa4,0xa5,0xa6};
+        rt_mutex_take(&lock,RT_WAITING_FOREVER);
+        if(ready)for(unsigned i=0;i<sizeof(regs);++i) {
+            uint8_t value=0;int rc=read_regs(regs[i],&value,1);
+            rt_kprintf("TP_REG %02x=%02x rc=%d\n",regs[i],value,rc);
+        }
+        rt_mutex_release(&lock);
+    }
     rt_kprintf("TP_STATUS ready=%u irq=%u frames=%u io_errors=%u bad_reports=%u active=%04x\n",ready,irqs,frames,errors,bad,tracker.active);
     return 0;
 }
@@ -131,3 +140,24 @@ void board527_touch_power(int on){if(initialized)control(&device,on?RTGRAPHIC_CT
 void board527_touch_lock(void){if(initialized)rt_mutex_take(&lock,RT_WAITING_FOREVER);}
 void board527_touch_unlock(void){if(initialized)rt_mutex_release(&lock);}
 int board527_touch_active(void){return tracker.active!=0;}
+
+/* Measurement only, never the normal touch-wake policy. The 0xa5/3 command
+ * follows FocalTech's suspend protocol. Wake by hardware reset, since deep
+ * touch Sleep need not detect a finger. The UI sequencer always restores it. */
+int board527_touch_test_sleep(int sleeping)
+{
+    int rc=-RT_ENOSYS;
+    if(!initialized)return rc;
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);
+    if(!sleeping)rc=reset();
+    else if(ready) {
+        uint8_t mode=3;
+        ready=0;rt_pin_irq_enable(44,PIN_IRQ_DISABLE);
+        ft5446_cancel(&tracker,emit,RT_NULL);
+        rc=rt_i2c_mem_write(bus,0x38,0xa5,8,&mode,1)==1?0:-RT_ERROR;
+        if(rc)reset();
+    }
+    rt_mutex_release(&lock);
+    rt_kprintf("TP_TEST_SLEEP requested=%d rc=%d ready=%u\n",sleeping,rc,ready);
+    return rc;
+}

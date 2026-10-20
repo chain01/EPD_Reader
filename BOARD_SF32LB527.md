@@ -68,6 +68,8 @@ See [hardware and build validation](VALIDATION_SF32LB527.md) for measured result
 
 See [font switching and idle sleep](VALIDATION_FONT_POWER_527.md) for bounded PSRAM font caching, retained-chapter reflow, measured switch times, sleep statistics and UART diagnostic limits.
 
+For battery-current diagnosis, [R32 minimum-power mode](MINIMUM_POWER_527.md) explicitly closes known external supplies and enters Hibernate without RAM retention. This manual test disables touch wake and exits by a full power cycle; ordinary reading idle still uses retained Deep Sleep. Prior differential current measurements and remaining unverified rail tests are recorded in [power diagnosis](VALIDATION_POWER_DIAG_527.md).
+
 `python tools/test_527_cache.py` requires a host GCC. It replays the actual C cache routines against GC16, DU, INIT and GL16 at the configured temperature, compares every packed output byte, checks bounded overflow, and verifies the cleaning-interval policy. Hardware optical checks remain necessary for ghosting and gray quality.
 
 It also checks preview hits, mismatches, cancellation and restoration of the displayed old pixel state. `READER_ACTION` reports processing time and card sectors read; `EPD527_PREFETCH` reports cache hits, saved preparation time and time to first scan. These start after event dequeue, not at finger contact; taps dispatch on release. See [measured page-turn latency](VALIDATION_PREFETCH_527.md).
