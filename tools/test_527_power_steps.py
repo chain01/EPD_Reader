@@ -5,7 +5,7 @@ p=argparse.ArgumentParser();p.add_argument('--cxx',default='g++');a=p.parse_args
 root=Path(__file__).resolve().parents[1]
 s=(root/'epdiy-epub/src/boards/sf32lb527/power_steps.cpp').read_text(encoding='utf8')
 policy=s[s.index('static int apply_stage'):s.index('int reader527_power_steps')]
-sequence=s[s.index('int reader527_power_steps'):]
+sequence=s[s.index('int reader527_power_steps'):s.index('/* Touch state comparison:')]
 stubs=r'''
 #include <cstdint>
 #include <cstdio>

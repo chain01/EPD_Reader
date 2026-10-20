@@ -161,3 +161,44 @@ int board527_touch_test_sleep(int sleeping)
     rt_kprintf("TP_TEST_SLEEP requested=%d rc=%d ready=%u\n",sleeping,rc,ready);
     return rc;
 }
+
+/* Diagnostic only: 0 held reset, 1 automatic idle/Monitor, 2 Sleep request.
+ * PA32 remains HIGH in every measured state. IRQ/worker remain disabled;
+ * the sequencer owns the timed wake and reboots to restore normal input. */
+int board527_touch_quiet_mode(unsigned mode)
+{
+    if(mode>2)return -RT_EINVAL;
+    if(!initialized)return -RT_ENOSYS;
+    int rc=0;uint8_t id=0,fw=0,work=0,gmode=1,auto_mode=0,pmode=0;
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);
+    disable();
+    rt_sem_control(&sem,RT_IPC_CMD_RESET,RT_NULL);
+    rt_pin_write(32,1);
+    rc=board_touch_reset(0);
+    if(rc)goto quiet_done;
+    rt_thread_mdelay(20);
+    if(!mode)goto quiet_done;
+    rc=board_touch_reset(1);
+    if(rc)goto quiet_done;
+    rt_thread_mdelay(300);
+    if(read_regs(0xa3,&id,1)||read_regs(0xa6,&fw,1)||read_regs(0,&work,1)||id!=0x54||(work&0x70)) {
+        rc=-RT_ERROR;goto quiet_done;
+    }
+    if(rt_i2c_mem_write(bus,0x38,0xa4,8,&gmode,1)!=1||read_regs(0xa4,&gmode,1)||gmode!=1) {
+        rc=-RT_ERROR;goto quiet_done;
+    }
+    // Observe the controller's own idle mode without forcing an unknown rate.
+    rt_thread_mdelay(1000);
+    if(read_regs(0x86,&auto_mode,1)||read_regs(0xa5,&pmode,1)) {rc=-RT_ERROR;goto quiet_done;}
+    if(mode==2) {
+        uint8_t sleep=3;
+        rc=rt_i2c_mem_write(bus,0x38,0xa5,8,&sleep,1)==1?0:-RT_ERROR;
+        // No I2C accesses after Sleep: do not disturb the measurement state.
+    }
+quiet_done:
+    if(rc)board_touch_reset(0);
+    rt_mutex_release(&lock);
+    rt_kprintf("TP_QUIET mode=%u PA32=1 id=%02x fw=%02x auto=%02x pm_before=%02x irq_enabled=0 rc=%d\n",
+        mode,id,fw,auto_mode,pmode,rc);
+    return rc;
+}

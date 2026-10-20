@@ -117,3 +117,60 @@ steps_finish:
     rt_thread_mdelay(50);drv_reboot();return rc;
 }
 
+/* Touch state comparison: supplies and parked buses are identical in A-D. */
+static void touch_card(Renderer *r,unsigned stage,unsigned seconds)
+{
+    static const char *names[]={"A - TOUCH HELD IN RESET","B - TOUCH AUTOMATIC IDLE","C - TOUCH SLEEP REQUEST","D - TOUCH HELD IN RESET AGAIN"};
+    clear_areas();r->clear_screen();
+    r->draw_text(20,65,"TOUCH POWER R36");
+    r->draw_text(20,175,names[stage]);
+    r->draw_text(20,285,"LDO3 ON / GE14 ON / PA32 HIGH");
+    r->draw_text(20,355,"Same supplies and bus pins in A-D.");
+    r->draw_text(20,425,"Touch IRQ / wake disabled in ALL stages.");
+    r->draw_text(20,495,"TF absent. No file reads.");
+    r->draw_text(20,565,"Frontlight / HV / amplifier OFF.");
+    r->draw_text(20,635,"CPU Deep Sleep; network timers paused.");
+    r->draw_text(20,730,"Unplug USB + COM36. Wait 10 sec.");
+    char text[70];rt_snprintf(text,sizeof(text),"Measure %u sec; auto next stage.",seconds);
+    r->draw_text(20,800,text);
+    r->draw_text(20,870,"After D: reboot restores touch.");
+    r->draw_text(20,950,"Please do not touch during measurement.");
+    r->flush_display();
+}
+int reader527_touch_states(Renderer *r,unsigned seconds)
+{
+    int rc=0;
+    rt_kprintf("TOUCH_STATES_PREPARE seconds=%u\n",seconds);
+    reader527_close_book_for_power_test();r->cancel_page_preview();board527_power_auto();
+    if(board_tf_present()!=0){rc=-RT_EBUSY;goto touch_finish;}
+    if(font_manager_select(0,28)){rc=-RT_ERROR;goto touch_finish;}
+    if(board527_frontlight_set(0,0)||board527_amplifier_test(1)){rc=-RT_ERROR;goto touch_finish;}
+    board527_touch_power(0);
+    if(tps_enter_sleep()!=RT_EOK){rc=-RT_ERROR;goto touch_finish;}
+    if(board527_storage_test_begin()){rc=-RT_EBUSY;goto touch_finish;}
+    save_pins();pm_disable_pin_wakeup(20);
+    rc=reader527_steps_quiet_start();
+    if(!rc)board527_steps_uart_idle(1);
+    for(unsigned stage=0;!rc&&stage<4;++stage) {
+        rc=display_power_on();if(rc)break;
+        touch_card(r,stage,seconds);
+        rc=apply_stage(3);if(rc)break;
+        // Restore only I2C1 for the mode command; identical pins for all stages.
+        HAL_PIN_Set(PAD_PA10,I2C1_SCL,PIN_NOPULL,1);
+        HAL_PIN_Set(PAD_PA11,I2C1_SDA,PIN_NOPULL,1);
+        unsigned mode=stage==3?0:stage;
+        rc=board527_touch_quiet_mode(mode);if(rc)break;
+        uint32_t before_count,before_ms,after_count,after_ms,reads=tf_msd_read_count();
+        board527_power_stats(&before_count,&before_ms);
+        rt_kprintf("TOUCH_STATE_BEGIN stage=%c mode=%u seconds=%u PERI_LDO=%08x\n",'A'+stage,mode,seconds,hwp_pmuc->PERI_LDO);
+        rt_thread_mdelay(20);
+        reader_power_idle();rt_thread_mdelay(seconds*1000u);reader_power_busy();
+        board527_power_stats(&after_count,&after_ms);
+        rt_kprintf("TOUCH_STATE_END stage=%c sleeps=%u sleep_ms=%u tf_sectors=%u\n",'A'+stage,after_count-before_count,after_ms-before_ms,tf_msd_read_count()-reads);
+    }
+touch_finish:
+    board527_steps_uart_idle(0);
+    rt_kprintf("TOUCH_STATES_DONE rc=%d; rebooting\n",rc);
+    rt_thread_mdelay(50);drv_reboot();return rc;
+}
+

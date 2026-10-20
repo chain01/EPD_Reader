@@ -19,6 +19,7 @@ void board527_touch_lock(void);
 void board527_touch_unlock(void);
 int board527_touch_active(void);
 int board527_touch_test_sleep(int sleeping);
+int board527_touch_quiet_mode(unsigned mode);
 void board527_power_auto(void);
 void board527_power_hold(void);
 void board527_power_stats(uint32_t *enters,uint32_t *sleep_ms);
