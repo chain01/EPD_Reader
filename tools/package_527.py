@@ -66,7 +66,7 @@ def main():
            'It must only be used with a verified full backup and serial/debug recovery access.\n' if args.factory else '')
         + 'images.json records byte lengths and SHA-256. See DFU_SF32LB527.md for recovery/protection limits.\n', encoding='utf-8')
     shutil.copy2(root/'tools/usb_dfu_527.py',args.output/'usb_dfu_527.py')
-    for name in ('DFU_SF32LB527.md','BOARD_SF32LB527.md','VALIDATION_SF32LB527.md','VALIDATION_PREFETCH_527.md','VALIDATION_WAVEPREP_527.md','VALIDATION_FONT_POWER_527.md','VALIDATION_POWER_DIAG_527.md','MINIMUM_POWER_527.md'):
+    for name in ('DFU_SF32LB527.md','BOARD_SF32LB527.md','VALIDATION_SF32LB527.md','VALIDATION_PREFETCH_527.md','VALIDATION_WAVEPREP_527.md','VALIDATION_FONT_POWER_527.md','VALIDATION_POWER_DIAG_527.md','MINIMUM_POWER_527.md','POWER_STEPS_527.md'):
         shutil.copy2(root/name,args.output/name)
     print(f'Packaged {len(images)} images in {args.output.resolve()}')
 

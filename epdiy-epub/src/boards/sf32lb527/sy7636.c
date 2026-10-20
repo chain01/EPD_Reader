@@ -78,6 +78,31 @@ int board_frontlight_gpio_report(void)
     return rc;
 }
 unsigned board_expander_generation(void) { return aw_generation; }
+int board527_steps_aw(int reset_hold,int logic_on)
+{
+    if(powered||configured||!aw_bus)return -RT_EBUSY;
+    if(reset_hold) {
+        rt_pin_write(3,0);aw_ready=0;++aw_generation;
+        return 0;
+    }
+    rt_pin_write(3,1);rt_thread_mdelay(5);
+    uint8_t id=0,p0=0,p1=0;int rc=0;
+    rt_mutex_take(&aw_lock,RT_WAITING_FOREVER);
+    if(reg_read(aw_bus,0x59,0x10,&id)||id!=0x23){rc=-RT_ERROR;goto steps_aw_done;}
+    // Never re-enable the original default GE14/15 during this initialization.
+    rc=reg_write(aw_bus,0x59,2,0)|reg_write(aw_bus,0x59,3,0)|
+       reg_write(aw_bus,0x59,0x11,0x10)|reg_write(aw_bus,0x59,0x12,0xff)|reg_write(aw_bus,0x59,0x13,0xff)|
+       reg_write(aw_bus,0x59,4,0x27)|reg_write(aw_bus,0x59,5,0x07)|
+       reg_write(aw_bus,0x59,6,0xff)|reg_write(aw_bus,0x59,7,0xff);
+    if(!rc&&logic_on)rc=reg_write(aw_bus,0x59,3,0x40);
+    rc|=reg_read(aw_bus,0x59,0,&p0)|reg_read(aw_bus,0x59,1,&p1);
+    if((p0&0xd8)||(p1&0xf8)!=(logic_on?0x40:0))rc=-RT_ERROR;
+steps_aw_done:
+    aw_ready=!rc;
+    rt_mutex_release(&aw_lock);
+    rt_kprintf("STEP_AW reset=0 logic=%d id=%02x p0=%02x p1=%02x rc=%d\n",logic_on,id,p0,p1,rc);
+    return rc;
+}
 static uint8_t test_p1_out,test_p1_dir;
 static int test_rail_saved;
 static uint8_t test_amp_out,test_amp_dir;

@@ -17,19 +17,33 @@ void BSP_GPIO_Set(int pin, int val, int is_porta)
 }
 
 #define MPI2_POWER_PIN  (11) /* unused; PA11 is TPS SDA on OED v1.2 */
+static int steps_uart_idle,steps_uart_parked;
+static uint32_t steps_uart_pads[2];
+void board527_steps_uart_idle(int enabled){steps_uart_idle=enabled;}
 
 __WEAK void BSP_PowerDownCustom(int coreid, bool is_deep_sleep)
 {
     /* Keep touch, AW9523B and frontlight rails stable across retained sleep. */
     (void)coreid; (void)is_deep_sleep;
-
+    if(steps_uart_idle) {
+        steps_uart_pads[0]=hwp_pinmux1->PAD_PA18;
+        steps_uart_pads[1]=hwp_pinmux1->PAD_PA19;
+        HAL_PIN_Set_Analog(PAD_PA18,1);HAL_PIN_Set_Analog(PAD_PA19,1);
+        steps_uart_parked=1;
+    }
 }
 
 __WEAK void BSP_PowerUpCustom(bool is_deep_sleep)
 {
     /* Cold boot still establishes LDO3; retained sleep never switches it off. */
-    if (is_deep_sleep) HAL_PMU_ConfigPeriLdo(PMU_PERI_LDO3_3V3, true, true);
-
+    if (is_deep_sleep) {
+        // Called from pre-init too: do not interpret uninitialized SRAM flags.
+        steps_uart_idle=0;steps_uart_parked=0;
+        HAL_PMU_ConfigPeriLdo(PMU_PERI_LDO3_3V3, true, true);
+    } else if(steps_uart_parked) {
+        hwp_pinmux1->PAD_PA18=steps_uart_pads[0];hwp_pinmux1->PAD_PA19=steps_uart_pads[1];
+        steps_uart_parked=0;
+    }
 }
 
 void PowerDownCustom(void)

@@ -20,7 +20,8 @@ extern int reader527_lcpu_measure(Renderer *,int);
 extern int reader527_rail_measure(Renderer *,int);
 extern int reader527_amp_measure(Renderer *,int);
 extern int reader527_minimum_power(Renderer *,bool);
-enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER,DEBUG_POWER,DEBUG_POWER_QUICK,DEBUG_LCPU,DEBUG_LCPU_QUICK,DEBUG_RAIL,DEBUG_RAIL_QUICK,DEBUG_AMP,DEBUG_AMP_QUICK,DEBUG_MINIMUM,DEBUG_MINIMUM_TEST};
+extern int reader527_power_steps(Renderer *,unsigned);
+enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER,DEBUG_POWER,DEBUG_POWER_QUICK,DEBUG_LCPU,DEBUG_LCPU_QUICK,DEBUG_RAIL,DEBUG_RAIL_QUICK,DEBUG_AMP,DEBUG_AMP_QUICK,DEBUG_MINIMUM,DEBUG_MINIMUM_TEST,DEBUG_STEPS,DEBUG_STEPS_QUICK};
 static void dump_frame(void)
 {
     const uint8_t *frame=board527_framebuffer();const unsigned size=1216*684/2;
@@ -37,7 +38,10 @@ static void dump_frame(void)
 }
 bool reader527_debug_message(uint32_t msg,Renderer *r)
 {
-    if(msg<DEBUG_HOME||msg>DEBUG_MINIMUM_TEST)return false;
+    if(msg<DEBUG_HOME||msg>DEBUG_STEPS_QUICK)return false;
+    if(msg==DEBUG_STEPS||msg==DEBUG_STEPS_QUICK) {
+        reader527_power_steps(r,msg==DEBUG_STEPS?120:5);return true;
+    }
     if(msg==DEBUG_MINIMUM||msg==DEBUG_MINIMUM_TEST) {
         reader527_minimum_power(r,msg==DEBUG_MINIMUM_TEST);return true;
     }
@@ -94,8 +98,8 @@ static int ui(int argc,char **argv)
         return 0;
     }
     if(argc==2) {
-        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter","power","power-quick","lp-power","lp-power-quick","rail-power","rail-power-quick","amp-power","amp-power-quick","min-power","min-power-test"};
-        for(unsigned n=0;n<18;++n)if(!strcmp(argv[1],names[n])) {
+        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter","power","power-quick","lp-power","lp-power-quick","rail-power","rail-power-quick","amp-power","amp-power-quick","min-power","min-power-test","power-steps","power-steps-quick"};
+        for(unsigned n=0;n<20;++n)if(!strcmp(argv[1],names[n])) {
             uint32_t msg=DEBUG_HOME+n;return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
         const char *actions[]={"prev","next","select","menu"};

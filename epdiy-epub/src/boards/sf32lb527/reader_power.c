@@ -33,6 +33,12 @@ void board527_power_auto(void)
     rt_timer_stop(&test_timer);
     diagnostic_hold(0);
 }
+void board527_power_stats(uint32_t *enters,uint32_t *sleep_ms)
+{
+    rt_base_t level=rt_hw_interrupt_disable();
+    *enters=entered;*sleep_ms=slept_ms;
+    rt_hw_interrupt_enable(level);
+}
 
 static void notify(uint8_t event, uint8_t mode, void *data)
 {
@@ -85,4 +91,5 @@ int board527_power_init(void)
 #else
 int board527_power_init(void) { return 0; }
 void board527_power_auto(void) {}
+void board527_power_stats(uint32_t *enters,uint32_t *sleep_ms){*enters=0;*sleep_ms=0;}
 #endif

@@ -88,6 +88,13 @@ static int quiet_network(int quiet)
     return network_result;
 }
 
+int reader527_steps_quiet_start()
+{
+    int rc=quiet_lcpu(1);
+    if(!rc)rc=quiet_network(1);
+    return rc;
+}
+
 static void card(Renderer *r,const char *stage,const char *touch,const char *network,int seconds,const char *version="POWER TEST R26")
 {
     clear_areas();r->clear_screen();
