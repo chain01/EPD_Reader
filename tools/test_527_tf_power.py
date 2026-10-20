@@ -16,10 +16,12 @@ shared=r'''
 #define RT_ENOSYS 38
 #define RT_IPC_FLAG_PRIO 0
 #define RT_WAITING_FOREVER -1
+#define RT_TICK_PER_SECOND 1000
 #define rt_kprintf(...) ((void)0)
 using rt_tick_t=uint32_t;
 static unsigned now;
 static unsigned rt_tick_get(){return now;}
+static unsigned rt_tick_get_millisecond(){return now;}
 static unsigned rt_tick_from_millisecond(unsigned n){return n;}
 static void rt_thread_mdelay(unsigned n){now+=n;}
 '''
@@ -46,13 +48,17 @@ static void tf_msd_power_lost(){cold=1;}
 '''+power[power.index('static int wake_locked'):power.index('static int tfpm')]+r'''
 int main(){
     assert(board527_storage_idle(1)==-RT_ENOSYS);
+    assert(board527_storage_wait_ms(5000)==5000);
     board527_io_init();board527_storage_pm_enable(1);assert(votes==0&&depth==0);
-    now=2999;assert(board527_storage_idle(0)==0&&parks==0);
-    now=3000;touch=1;assert(board527_storage_idle(0)==-RT_EBUSY&&parks==0);touch=0;
+    assert(board527_storage_wait_ms(5000)==500&&board527_storage_wait_ms(100)==100);
+    now=499;assert(board527_storage_idle(0)==0&&parks==0&&board527_storage_wait_ms(5000)==1);
+    now=500;touch=1;assert(board527_storage_idle(0)==-RT_EBUSY&&parks==0);touch=0;
+    assert(board527_storage_wait_ms(5000)==50);
     hv_busy=1;assert(board527_storage_idle(1)==-RT_EBUSY&&parks==0&&!cold&&automatic&&errors==0);hv_busy=0;
     other_thread=1;assert(board527_storage_idle(1)==-RT_EBUSY);other_thread=0;
     assert(board527_storage_idle(0)==0&&rail_off&&cold&&sleeps==1);
     assert(votes==0&&depth==0);
+    assert(board527_storage_wait_ms(5000)==5000);
     int calls=gate_calls;assert(board527_storage_idle(1)==0&&gate_calls==calls);
     assert(board527_io_enter()==0&&!rail_off&&restores==1&&wakes==1&&votes==1);
     assert(board527_io_enter()==0&&votes==2&&depth==2);
@@ -66,6 +72,11 @@ int main(){
     assert(board527_io_enter()!=0&&rail_off&&votes==0&&depth==0);fail_on=0;
     assert(!board527_io_enter()&&!rail_off);board527_io_exit();
     board527_storage_pm_enable(0);calls=gate_calls;assert(!board527_storage_idle(1)&&gate_calls==calls);
+    assert(board527_storage_wait_ms(5000)==5000);
+    board527_storage_pm_enable(1);last_use=0xffffff00u;now=0x0000002cu;
+    assert(board527_storage_wait_ms(5000)==200); // tick wrap, 300ms elapsed
+    other_thread=1;assert(board527_storage_wait_ms(5000)==50&&board527_storage_wait_ms(20)==20);other_thread=0;
+    assert(votes==0&&depth==0);
     puts("TF_POWER_IDLE_LOCK_WAKE_FAILURE_DIAGNOSTIC_VOTES_PASS");
 }
 '''

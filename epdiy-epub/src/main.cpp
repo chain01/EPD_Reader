@@ -1145,7 +1145,10 @@ void main_task(void *param)
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
     if (!epd_font_ft_preheat_is_running() &&
         !(ui_state==READING_EPUB && reader &&
-          (reader->has_pending_layout() || reader->has_pending_preview()))) wait_ms = 5000;
+          (reader->has_pending_layout() || reader->has_pending_preview()))) {
+        board->sleep_filesystem();
+        wait_ms=board527_storage_wait_ms(5000);
+    }
     wait_ms=auto_turn_clock.wait(rt_tick_get_millisecond(),reading_auto_turn_seconds(),auto_turn_eligible(),wait_ms);
     reader_power_idle();
 #endif

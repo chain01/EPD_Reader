@@ -86,7 +86,7 @@ int board527_storage_idle(int force)
     if(rt_mutex_take(&shared_lock,0)!=RT_EOK)return -RT_EBUSY;
     int rc=0;
     if(!automatic||rail_off||
-       (!force&&(rt_tick_t)(rt_tick_get()-last_use)<rt_tick_from_millisecond(3000)))goto done;
+       (!force&&(rt_tick_t)(rt_tick_get()-last_use)<rt_tick_from_millisecond(500)))goto done;
     if(board527_touch_active()||!board527_logic_sleep_ready()){rc=-RT_EBUSY;goto done;}
     reader_power_busy();
     // Wait for card programming to finish and check status before removing VDD.
@@ -97,13 +97,32 @@ int board527_storage_idle(int force)
         tf_msd_power_lost();
         rc=board527_logic_power(0);
         rail_off=1;
-        if(!rc){++sleeps;rt_kprintf("TF_PM_SLEEP rail=0 count=%u mounted_state=retained\n",sleeps);}
+        if(!rc){++sleeps;rt_kprintf("TF_PM_SLEEP rail=0 count=%u mounted_state=retained idle_ms=%u tick_ms=%u\n",
+            sleeps,(unsigned)((uint64_t)(rt_tick_t)(rt_tick_get()-last_use)*1000/RT_TICK_PER_SECOND),rt_tick_get_millisecond());}
         else {automatic=0;++errors;(void)wake_locked();}
     } else {automatic=0;++errors;}
     if(rc)rt_kprintf("TF_PM_SUSPEND_FAIL rc=%d auto=0\n",rc);
     reader_power_idle();
 done:
     rt_mutex_release(&shared_lock);return rc;
+}
+/* Called after attempting idle, only when layout/preheat/preview are finished.
+ * Let the existing UI queue timeout reach the idle deadline instead of waiting
+ * another five seconds. Once off/disabled, keep the normal long sleep. */
+unsigned board527_storage_wait_ms(unsigned normal_wait_ms)
+{
+    if(!initialized)return normal_wait_ms;
+    unsigned delay=50;
+    if(rt_mutex_take(&shared_lock,0)!=RT_EOK)return delay<normal_wait_ms?delay:normal_wait_ms;
+    if(!automatic||rail_off)delay=normal_wait_ms;
+    else {
+        rt_tick_t elapsed=rt_tick_get()-last_use,threshold=rt_tick_from_millisecond(500);
+        if(elapsed<threshold)
+            delay=(unsigned)(((uint64_t)(threshold-elapsed)*1000+RT_TICK_PER_SECOND-1)/RT_TICK_PER_SECOND);
+        // An expired deadline with active hardware/gesture retries boundedly.
+    }
+    rt_mutex_release(&shared_lock);
+    return delay<normal_wait_ms?delay:normal_wait_ms;
 }
 static int tfpm(int argc,char **argv)
 {

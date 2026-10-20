@@ -28,6 +28,7 @@ void board527_io_diagnostic_end(void);
 int board527_logic_power(int on);
 int board527_logic_sleep_ready(void);
 int board527_storage_idle(int force);
+unsigned board527_storage_wait_ms(unsigned normal_wait_ms);
 void board527_storage_pm_enable(int enabled);
 void board527_power_auto(void);
 void board527_power_hold(void);
