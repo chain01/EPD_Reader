@@ -48,6 +48,7 @@ jobs:
         python3 tools/test_527_lcpu_sleep.py
         python3 tools/test_527_minimum_power.py
         python3 tools/test_527_power_steps.py
+        python3 tools/test_527_power_boot.py
         python3 tools/test_527_dfu.py
         python3 tools/test_527_dfu_package.py
         

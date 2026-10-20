@@ -20,6 +20,7 @@ void board527_touch_unlock(void);
 int board527_touch_active(void);
 int board527_touch_test_sleep(int sleeping);
 void board527_power_auto(void);
+void board527_power_hold(void);
 void board527_power_stats(uint32_t *enters,uint32_t *sleep_ms);
 void board527_steps_uart_idle(int enabled);
 int board527_steps_aw(int reset_hold,int logic_on);

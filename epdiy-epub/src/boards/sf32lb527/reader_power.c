@@ -27,6 +27,7 @@ static void test_finished(void *arg)
     /* Timed test returns to awake so a non-wake-capable UART can read results. */
     diagnostic_hold(1);
 }
+void board527_power_hold(void) { diagnostic_hold(1); }
 
 void board527_power_auto(void)
 {
@@ -79,17 +80,19 @@ int board527_power_init(void)
         HAL_PMU_DisableRtcWakeup();
         rt_kprintf("MINPOWER_HIBERNATE_WAKE rtc_test_timer_disabled=1\n");
     }
-    /* PA44 is HPAON PIN20 on SF32LB52x. Keep its GPIO IRQ enabled as well. */
-    int rc = pm_enable_pin_wakeup(20, AON_PIN_MODE_NEG_EDGE);
-    if (rc) return rc;
+    // Always initialize diagnostic state, including the missing-touch path.
     rt_timer_init(&test_timer,"pwrtest",test_finished,RT_NULL,
                   rt_tick_from_millisecond(10000),RT_TIMER_FLAG_ONE_SHOT);
     rt_pm_notify_set(notify, RT_NULL);
+    /* PA44 is HPAON PIN20 on SF32LB52x. Keep its GPIO IRQ enabled as well. */
+    int rc = pm_enable_pin_wakeup(20, AON_PIN_MODE_NEG_EDGE);
+    if (rc) return rc;
     rt_kprintf("PWR_READY policy=deep tickless=1 touch_wake=PA44 rails_retained=1\n");
     return 0;
 }
 #else
 int board527_power_init(void) { return 0; }
 void board527_power_auto(void) {}
+void board527_power_hold(void) {}
 void board527_power_stats(uint32_t *enters,uint32_t *sleep_ms){*enters=0;*sleep_ms=0;}
 #endif

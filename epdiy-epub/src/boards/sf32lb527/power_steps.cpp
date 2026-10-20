@@ -44,7 +44,7 @@ static void stage_card(Renderer *r,unsigned stage,unsigned seconds)
 {
     static const char *names[]={"A - MINIMUM RETAINED BASELINE","B - ADD AW9523B ACTIVE","C - ADD LDO3 SUPPLY","D - ADD GE14 SHARED 3V3"};
     clear_areas();r->clear_screen();
-    r->draw_text(20,65,"POWER STEPS R34 / ROUND 1");
+    r->draw_text(20,65,"POWER STEPS R35 / ROUND 1");
     r->draw_text(20,175,names[stage]);
     r->draw_text(20,285,"CPU: retained Deep Sleep in ALL stages");
     r->draw_text(20,355,stage?"AW: active, peripheral enables OFF":"AW: held RESET (outputs high-Z)");

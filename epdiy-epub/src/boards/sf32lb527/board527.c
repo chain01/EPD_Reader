@@ -10,8 +10,9 @@ int board527_init(void)
     if(initialized)return 0;
     if(tps_init(1100)||board527_display_init())return -1;
     int light=frontlight_start(),touch=board527_touch_init();
-    if (touch || board527_power_init()) {
-        reader_power_busy(); /* Do not sleep without an initialized wake input. */
+    int power=board527_power_init(); // Diagnostics need timers even without touch.
+    if (touch || power) {
+        board527_power_hold(); /* Manual timed diagnostics may release this hold. */
         rt_kprintf("PWR_DISABLED touch wake initialization failed\n");
     }
     initialized=1;
