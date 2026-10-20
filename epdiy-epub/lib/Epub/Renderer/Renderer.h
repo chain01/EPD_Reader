@@ -44,6 +44,9 @@ public:
   virtual void clear_screen() = 0;
   virtual void flush_display(){};
   virtual void flush_area(int x, int y, int width, int height){};
+  virtual bool begin_page_preview(){return false;}
+  virtual void end_page_preview(int (*cancel)(void *),void *context){}
+  virtual void cancel_page_preview(){}
 
   virtual int get_page_width() = 0;
   virtual int get_page_height() = 0;

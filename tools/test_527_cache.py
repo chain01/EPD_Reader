@@ -43,6 +43,11 @@ static void *epub_mem_malloc(size_t n){return malloc(n);}
 static void epub_mem_free(void *p){free(p);}
 static uint8_t phase_luts[64][256];
 static uint8_t phases[MAX_PHASES][64];
+static int prepared;
+static unsigned prepared_mode,prepared_count,prepared_index,prepared_ms;
+static int (*prepare_cancel)(void *);
+static void *prepare_context;
+static int prepare_cancelled;
 static void mpu_dcache_clean(void *p,unsigned n){(void)p;(void)n;}
 static void waveform_bin_reader_fill_lut(uint32_t *out,unsigned f)
 {
@@ -51,17 +56,27 @@ static void waveform_bin_reader_fill_lut(uint32_t *out,unsigned f)
 '''
 workspace=driver[driver.index('typedef union {'):driver.index('L2_NON_RET_BSS_SECT_BEGIN')]
 header+=workspace+'\nstatic PhaseWorkspace workspace;\n#define full_frame workspace.frame\n'
+header+=driver[driver.index('static int preparation_cancelled'):driver.index('L1_RET_CODE_SECT(epd527, static void pin')]
 present_stubs=r'''
 #define RT_WAITING_FOREVER -1
 #define RT_ENOMEM 5
+typedef unsigned WAVE_TABLE_MODE_T;
+static unsigned loaded_count,temperature=28,ticks;
+static unsigned waveform_bin_reader_get_frames(unsigned t,unsigned m){(void)t;(void)m;return loaded_count;}
+static unsigned rt_tick_get(void){return ++ticks;}
+#define rt_kprintf(...) ((void)0)
 static int ready=1,previous_known,lock,drive_result;
 static unsigned full_period=10,refresh_index,drive_calls,drive_mode;
 static void rt_mutex_take(int *p,int wait){(void)wait;++*p;}
 static void rt_mutex_release(int *p){--*p;}
 static void lock_devices(void){}
 static void unlock_devices(void){}
-static int drive(unsigned mode){++drive_calls;drive_mode=mode;return drive_result;}
+static void release_extra_cache(void);
+static int drive(unsigned mode){++drive_calls;drive_mode=mode;prepared=0;release_extra_cache();return drive_result;}
 static uint8_t requested[W*H/2];
+static int cancellation_checks;
+static int cancel_after(void *arg){return ++cancellation_checks>*(int *)arg;}
+static int cancel_pulse(void *arg){return ++cancellation_checks==*(int *)arg;}
 '''
 main=r'''
 int main(int argc,char **argv)
@@ -89,6 +104,29 @@ int main(int argc,char **argv)
     assert(argc==2);FILE *wave=fopen(argv[1],"rb");assert(wave);
     unsigned count;assert(fread(&count,1,4,wave)==4&&count<=MAX_PHASES);
     assert(fread(phases,64,count,wave)==count);fclose(wave);
+    loaded_count=count;
+    memset(mixed,255,sizeof(mixed));memset(requested,0x77,sizeof(requested));
+    previous_known=1;refresh_index=1;unsigned calls=drive_calls;
+    assert(board527_display_prepare(requested,NULL,NULL)==0&&prepared&&drive_calls==calls);
+    for(unsigned i=0;i<W*H;++i)assert(mixed[i]==0xf7);
+    assert(board527_display_present(requested)==0&&!prepared&&drive_calls==calls+1);
+    for(unsigned i=0;i<W*H;++i)assert((mixed[i]&15)==7);
+    memset(requested,0x88,sizeof(requested));assert(board527_display_prepare(requested,NULL,NULL)==0);
+    /* Backward/menu render differs from candidate: old pixel must remain 7. */
+    memset(requested,0x33,sizeof(requested));assert(board527_display_present(requested)==0&&!prepared);
+    for(unsigned i=0;i<W*H;++i)assert(mixed[i]==0x73);
+    memset(requested,0xaa,sizeof(requested));cancellation_checks=0;int cancel_limit=50;
+    assert(board527_display_prepare(requested,cancel_after,&cancel_limit)!=0&&!prepared);
+    for(unsigned i=0;i<W*H;++i)assert((mixed[i]&15)==3);
+    assert(!extra_cache&&!extra_allocation&&!prepare_cancel);
+    cancellation_checks=0;
+    assert(board527_display_prepare(requested,cancel_pulse,&cancel_limit)!=0&&!prepared);
+    for(unsigned i=0;i<W*H;++i)assert((mixed[i]&15)==3);
+    assert(board527_display_prepare(requested,NULL,NULL)==0);
+    board527_display_cancel_prepare();
+    for(unsigned i=0;i<W*H;++i)assert((mixed[i]&15)==3);
+    assert(!prepared&&!extra_cache&&lock==0);
+    puts("PREFETCH_HIT_MISS_CANCEL_STATE_PASS");
     for(unsigned test=0;test<6;++test) {
         unsigned random=0x527e0470u;
         for(unsigned y=0;y<H;++y)for(unsigned x=0;x<W;++x) {
@@ -131,6 +169,11 @@ int main(int argc,char **argv)
         printf("CACHE_REPLAY_PASS case=%u rows=%u bytes=%u raw=%u packed=%u reused=%u\n",test,cached_rows,cache_used,raw_cache,packed_rows,reused_rows);
         release_extra_cache();assert(!extra_cache&&!extra_allocation&&!extra_bytes);
     }
+    /* Old 512KiB allocation steps discarded nearly half a MiB in this case. */
+    available_heap=2u*1024*1024-4096;
+    assert(extend_cache(1200u*1024)==0&&extra_bytes>=1200u*1024);
+    assert(extra_bytes+512u*1024+63<=available_heap);
+    release_extra_cache();
     available_heap=512u*1024; /* Reserved application heap must not be borrowed. */
     cached_rows=0;cache_used=CACHE_BYTES;memset(row_slots,0,sizeof(row_slots));uint8_t row[DATA_BYTES];memset(row,0xa5,sizeof(row));
     assert(cache_row(row)==-1&&cache_used==CACHE_BYTES);
@@ -138,7 +181,7 @@ int main(int argc,char **argv)
 }
 '''
 with tempfile.TemporaryDirectory(prefix='reader527-cache-') as temp:
-    path=Path(temp);c=path/'cache_test.c';exe=path/'cache_test.exe';c.write_text(header+section+policy+present_stubs+present+main)
+    path=Path(temp);c=path/'cache_test.c';exe=path/'cache_test.exe';c.write_text(header+present_stubs+section+policy+present+main)
     subprocess.run([a.gcc,'-O2','-Wall','-Wextra',str(c),'-o',str(exe)],check=True)
     wave=(root/'epdiy-epub/waveform/e0470a03/epd_waveform.bin').read_bytes()
     for mode in (0,1,3,5):

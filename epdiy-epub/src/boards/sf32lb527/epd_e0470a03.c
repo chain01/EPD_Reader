@@ -72,6 +72,18 @@ ALIGN(32) static uint8_t neutral_row[ROW_BYTES];
 static uint16_t row_map[H], unique_y[H];
 static uint32_t row_hash[H];
 static uint32_t last_scan_us;
+static int prepared;
+static unsigned prepared_mode,prepared_count,prepared_index,prepared_ms;
+static int (*prepare_cancel)(void *);
+static void *prepare_context;
+static int prepare_cancelled;
+static int preparation_cancelled(void)
+{
+    // A short contact can end between checks. Once cancelled, never resume a
+    // partially generated row map/cache during the same preparation attempt.
+    if(prepare_cancel&&prepare_cancel(prepare_context))prepare_cancelled=1;
+    return prepare_cancelled;
+}
 
 L1_RET_CODE_SECT(epd527, static void pin(unsigned n, unsigned v))
 {
@@ -224,8 +236,12 @@ static int extend_cache(unsigned needed)
     /* Borrow only while presenting an already-rendered page. Keep at least
      * 512KiB free for background layout and fonts; never resize live data. */
     unsigned available=epub_mem_available_size();
-    for(unsigned size=2u*1024*1024;size>=512u*1024;size-=512u*1024) {
-        if(size<needed||size+512u*1024+63>available)continue;
+    const unsigned reserve=512u*1024+63;
+    unsigned budget=available>reserve?available-reserve:0;
+    if(budget>2u*1024*1024)budget=2u*1024*1024;
+    budget&=~(64u*1024-1);
+    for(unsigned size=budget;size>=64u*1024;size-=64u*1024) {
+        if(size<needed)break;
         extra_allocation=epub_mem_malloc(size+63);
         if(!extra_allocation)continue;
         extra_cache=(uint8_t *)(((uintptr_t)extra_allocation+63)&~(uintptr_t)63);
@@ -252,6 +268,7 @@ static void map_rows(void)
     unique_rows=0;
     memset(workspace.prep.masks,0,sizeof(workspace.prep.masks));
     for(unsigned y=0;y<H;++y) {
+        if(preparation_cancelled())return;
         const uint8_t *row=mixed+y*W;uint32_t hash=2166136261u;
         for(unsigned x=0;x<W;++x)hash=(hash^row[x])*16777619u;
         unsigned n;
@@ -271,8 +288,19 @@ static int cache_row(const uint8_t *raw)
     uint8_t encoded[DATA_BYTES*2];unsigned size=0;
     for(unsigned i=0;i<DATA_BYTES;) {
         unsigned run=1;
-        while(i+run<DATA_BYTES && raw[i+run]==raw[i] && run<255)++run;
-        encoded[size++]=run;encoded[size++]=raw[i];i+=run;
+        while(i+run<DATA_BYTES&&raw[i+run]==raw[i]&&run<128)++run;
+        if(run>=3) {
+            encoded[size++]=0x80|(run-1);encoded[size++]=raw[i];i+=run;
+        } else {
+            // Literal spans avoid doubling every isolated antialiasing byte.
+            unsigned first=i;
+            do {
+                ++i;
+                if(i>=DATA_BYTES||i-first==128)break;
+            } while(!(i+2<DATA_BYTES&&raw[i]==raw[i+1]&&raw[i]==raw[i+2]));
+            encoded[size++]=i-first-1;
+            memcpy(encoded+size,raw+first,i-first);size+=i-first;
+        }
     }
     const uint8_t *data=encoded;unsigned tag=size;
     if(size>=DATA_BYTES){data=raw;size=DATA_BYTES;tag=size|0x8000;}
@@ -299,6 +327,7 @@ static int prepare_phases(unsigned count)
 {
     cached_rows=cache_used=packed_rows=reused_rows=0;
     memset(row_slots,0,sizeof(row_slots));map_rows();
+    if(preparation_cancelled())return -1;
     ALIGN(4) uint8_t row[DATA_BYTES];uint16_t mapping[H];
     uint8_t relevant[256]={0};
     uint32_t all_used[8]={0};
@@ -323,6 +352,7 @@ static int prepare_phases(unsigned count)
             reused_rows+=unique_rows;continue;
         }
         for(unsigned r=0;r<unique_rows;++r) {
+            if(preparation_cancelled())return -1;
             const uint32_t *mask=workspace.prep.masks[r];
             uint32_t hash=2166136261u;
             for(unsigned i=0;i<16;++i)hash=(hash^(planes[i]&mask[i&7]))*16777619u;
@@ -359,7 +389,12 @@ static void expand_row(const uint8_t *in,uint8_t *out)
     if(tag&0x8000)memcpy(out,in,DATA_BYTES);
     else {
         const uint8_t *end=in+tag;
-        while(in<end){unsigned n=*in++,value=*in++;memset(out,value,n);out+=n;}
+        while(in<end) {
+            unsigned control=*in++,n=(control&127)+1;
+            if(control&128){memset(out,*in++,n);}
+            else {memcpy(out,in,n);in+=n;}
+            out+=n;
+        }
     }
 }
 static void promote_raw_cache(void)
@@ -372,6 +407,7 @@ static void promote_raw_cache(void)
     /* Every encoded record is <=306 bytes, smaller than a 316-byte raw row.
      * Expand backwards; earlier compressed records can never be overwritten. */
     for(unsigned n=cached_rows;n>0;--n) {
+        if(preparation_cancelled()){raw_cache=0;return;}
         unsigned row=n-1;const uint8_t *in=cache_address(row_offsets[row]);
         unsigned tag=in[0]|in[1]<<8;
         memcpy(encoded,in,(tag&0x7fff)+2);
@@ -391,17 +427,21 @@ static void expand_phase(unsigned phase)
 }
 static int drive(unsigned mode)
 {
-    unsigned count=waveform_bin_reader_get_frames(temperature,(WAVE_TABLE_MODE_T)mode);
+    int hit=prepared&&prepared_mode==mode&&prepared_index==refresh_index;
+    unsigned saved_ms=hit?prepared_ms:0;
+    unsigned count=hit?prepared_count:waveform_bin_reader_get_frames(temperature,(WAVE_TABLE_MODE_T)mode);
+    prepared=0;
     if(!count||count>MAX_PHASES)return -1;
     uint32_t begin=rt_tick_get(),scan_cycles=0,expand_cycles=0,visible_ms=0;unsigned done=0;
-    if(prepare_phases(count)) {
+    if(!hit&&prepare_phases(count)) {
         ++errors;rt_kprintf("EPD527_CACHE_FULL HV=OFF rows=%u bytes=%u\n",cached_rows,cache_used);
         release_extra_cache();return -RT_ENOMEM;
     }
-    promote_raw_cache();unsigned prep_ms=rt_tick_get()-begin;
+    if(!hit)promote_raw_cache();unsigned prep_ms=rt_tick_get()-begin;
     memset(full_frame,0,sizeof(full_frame));aborted=0;
     rt_timer_start(&cutoff);
     if(tps_exit_sleep()!=RT_EOK){aborted=1;goto cleanup;}
+    unsigned first_scan_ms=rt_tick_get()-begin;
     for(unsigned f=0;f<count;++f) {
         active_phase=f;
         uint32_t tick=HAL_DBG_DWT_GetCycles();if(!raw_cache)expand_phase(f);
@@ -425,6 +465,7 @@ cleanup:
     rt_kprintf("EPD527_REUSE packed_rows=%u reused_rows=%u\n",packed_rows,reused_rows);
     rt_kprintf("EPD527_TIMING visible_ms=%u discharge_guard_ms=450\n",visible_ms);
     rt_kprintf("EPD527_MEMORY borrowed=%u released=1\n",borrowed);
+    rt_kprintf("EPD527_PREFETCH hit=%u saved_ms=%u first_scan_ms=%u\n",hit,saved_ms,first_scan_ms);
     return 0;
 }
 static void lock_devices(void)
@@ -440,11 +481,61 @@ static unsigned refresh_mode(unsigned period,unsigned index,int has_gray,int old
     if(!period||index%period==0)return 0;
     return has_gray||old_gray?5:1;
 }
+/* While prepared, mixed retains displayed old levels in the upper nibble and
+ * the expected next page in the lower nibble. It is never panel state yet. */
+static void discard_prepared(void)
+{
+    if(prepared)for(unsigned i=0;i<W*H;++i)mixed[i]>>=4;
+    prepared=0;release_extra_cache();
+}
+void board527_display_cancel_prepare(void)
+{
+    if(!ready)return;
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);discard_prepared();rt_mutex_release(&lock);
+}
+int board527_display_prepare(const uint8_t *gray4,int (*cancel)(void *),void *context)
+{
+    if(!ready||!gray4)return -1;
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);discard_prepared();
+    if(!previous_known){rt_mutex_release(&lock);return -1;}
+    uint32_t begin=rt_tick_get();int gray=0,old_gray=0,changed=0,rc=-1;
+    for(unsigned i=0;i<W*H;++i) {
+        unsigned old=mixed[i]&15,next=(gray4[i/2]>>((i&1)*4))&15;
+        changed|=old!=next;gray|=next!=0&&next!=15;old_gray|=old!=0&&old!=15;
+        mixed[i]=(old<<4)|next;
+    }
+    prepared=1; /* Also enables rollback on cancellation/allocation failure. */
+    prepare_cancel=cancel;prepare_context=context;prepare_cancelled=0;
+    if(changed&&!preparation_cancelled()) {
+        prepared_mode=refresh_mode(full_period,refresh_index,gray,old_gray);
+        prepared_count=waveform_bin_reader_get_frames(temperature,(WAVE_TABLE_MODE_T)prepared_mode);
+        if(prepared_count&&prepared_count<=MAX_PHASES&&!prepare_phases(prepared_count)) {
+            promote_raw_cache();
+            if(!preparation_cancelled())rc=0;
+        }
+    }
+    prepare_cancel=RT_NULL;prepare_context=RT_NULL;prepare_cancelled=0;
+    prepared_ms=rt_tick_get()-begin;prepared_index=refresh_index;
+    if(rc)discard_prepared();
+    rt_kprintf("EPD527_PREPARED ready=%u ms=%u raw=%u borrowed=%u HV=OFF\n",!rc,prepared_ms,raw_cache,extra_bytes);
+    rt_mutex_release(&lock);return rc;
+}
 int board527_display_present(const uint8_t *gray4)
 {
     if(!ready||!gray4)return -1;
     rt_mutex_take(&lock,RT_WAITING_FOREVER);lock_devices();
     int rc=0,has_gray=0,old_gray=0,changed=0;
+    if(prepared) {
+        int match=previous_known&&prepared_index==refresh_index;
+        for(unsigned i=0;match&&i<W*H;++i)
+            if((mixed[i]&15)!=((gray4[i/2]>>((i&1)*4))&15))match=0;
+        if(match) {
+            rc=drive(prepared_mode);
+            if(!rc){previous_known=1;++refresh_index;}
+            goto finish;
+        }
+        discard_prepared();
+    }
     if(!previous_known) {
         memset(mixed,0xff,sizeof(mixed));
         rc=drive(3);if(rc)goto finish;
@@ -484,11 +575,16 @@ int board527_display_init(void)
 }
 void board527_display_off(void){idle();}
 uint8_t *board527_framebuffer(void){return reader_frame;}
-void set_part_disp_times(int count){full_period=count<0?0:(unsigned)count;refresh_index=0;}
+void set_part_disp_times(int count)
+{
+    board527_display_cancel_prepare();full_period=count<0?0:(unsigned)count;refresh_index=0;
+}
 static int epd(int argc,char **argv)
 {
     (void)argc;(void)argv;
     rt_kprintf("EPD527_STATUS ready=%d known=%d draws=%u frames=%u errors=%u last_ms=%u full_screen=1\n",ready,previous_known,draws,frames_total,errors,last_ms);
+    rt_kprintf("EPD527_BUFFER prepared=%u bytes=%u rows=%u borrowed=%u app_free=%u\n",
+        prepared,cache_used,cached_rows,extra_bytes,(unsigned)epub_mem_available_size());
     return 0;
 }
 MSH_CMD_EXPORT(epd, E0470A03 status);

@@ -9,12 +9,16 @@ extern "C" {
 int board527_init(void);
 int board527_display_init(void);
 int board527_display_present(const uint8_t *gray4);
+int board527_display_prepare(const uint8_t *gray4,int (*cancel)(void *),void *context);
+void board527_display_cancel_prepare(void);
 uint8_t *board527_framebuffer(void);
 void board527_display_off(void);
 int board527_touch_init(void);
 void board527_touch_power(int on);
 void board527_touch_lock(void);
 void board527_touch_unlock(void);
+int board527_touch_active(void);
+uint32_t tf_msd_read_count(void);
 int board527_storage_mount(void);
 int board527_frontlight_set(unsigned cold,unsigned warm);
 void board527_frontlight_get(unsigned *cold,unsigned *warm);

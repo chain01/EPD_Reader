@@ -17,6 +17,7 @@
 #include "spi_msd.h"
 #include "epd_tps.h"
 static unsigned write_allowed,read_sectors,write_sectors,io_errors,blocked_writes;
+uint32_t tf_msd_read_count(void){return read_sectors;}
 void tf_msd_write_enable(int on){write_allowed=on!=0;}
 
 #ifndef MSD_SPI_BUS_NAME

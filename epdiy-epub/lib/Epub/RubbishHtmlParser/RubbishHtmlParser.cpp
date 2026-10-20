@@ -313,6 +313,23 @@ void RubbishHtmlParser::layout_continue(int target_pages)
 /*==========================================================================
  * render_page — 持锁渲染
  *========================================================================*/
+bool RubbishHtmlParser::render_text_preview(int index,Renderer *renderer,Epub *epub,int (*cancel)(void *),void *context)
+{
+    rt_mutex_take(m_pages_mutex,RT_WAITING_FOREVER);
+    bool ok=index>=0&&index<(int)pages.size();
+    // Image decoding can block cancellation for seconds. Preview completed text
+    // pages first, checking input between lines; regular rendering handles images.
+    if(ok)for(auto element:pages[index]->elements)if(element->is_image()){ok=false;break;}
+    if(ok) {
+        renderer->clear_screen();
+        for(auto element:pages[index]->elements) {
+            if(cancel&&cancel(context)){ok=false;break;}
+            element->render(renderer,epub);
+        }
+    }
+    rt_mutex_release(m_pages_mutex);return ok;
+}
+
 void RubbishHtmlParser::render_page(int page_index, Renderer *renderer, Epub *epub)
 {
   renderer->clear_screen();

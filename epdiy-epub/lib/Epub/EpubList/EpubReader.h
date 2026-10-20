@@ -16,6 +16,8 @@ private:
   Renderer *renderer = nullptr;
   RubbishHtmlParser *parser = nullptr;
   int m_layout_batch_size = 1;
+  bool preview_attempted=false;
+  void render_progress(int page);
 
   // --- 后台排版线程 ---
   rt_thread_t  m_layout_thread = RT_NULL;
@@ -57,6 +59,7 @@ public:
   void prev();
   void jump_pages(int delta);
   void render();
+  bool prepare_next_page(int (*cancel)(void *),void *context);
   void set_state_section(uint16_t current_section);
   void preheat(int num_sections = 1);
 

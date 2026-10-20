@@ -20,6 +20,7 @@ static const char *TAG = "EREADER";
 extern "C" rt_uint32_t heap_free_size(void);
 
 EpubReader::~EpubReader() {
+    renderer->cancel_page_preview();
     stop_layout_thread();
     epd_font_ft_preheat_stop();
     if(epub) delete epub;
@@ -233,6 +234,7 @@ void EpubReader::prev()
 
 void EpubReader::render()
 {
+  preview_attempted=false;
   if (!parser)
   {
     parse_and_layout_current_section();
@@ -260,11 +262,19 @@ void EpubReader::render()
   ulog_d(TAG, "rendered page %d of %d", state.current_page, parser->get_page_count());
   ulog_d(TAG, "after render: %d", heap_free_size());
 
-  // 章节进度
+  render_progress(state.current_page);
+
+  if (overlay_active)render_overlay();
+  start_layout_thread();
+}
+
+void EpubReader::render_progress(int page)
+{
+  // Same page count, positions and font treatment for preview and actual draw.
   if (state.pages_in_current_section > 0)
   {
     char buf[32];
-    rt_snprintf(buf, sizeof(buf), "%d页/%d页", state.current_page + 1, state.pages_in_current_section);
+    rt_snprintf(buf, sizeof(buf), "%d页/%d页", page + 1, state.pages_in_current_section);
     int page_w = renderer->get_page_width();
     int page_h = renderer->get_page_height();
     int text_w = renderer->get_text_width(buf);
@@ -276,14 +286,24 @@ void EpubReader::render()
     renderer->draw_text(x, y, buf, false, true);
   }
 
-  // 绘制半屏覆盖操作层
-  if (overlay_active)
-  {
-    render_overlay();
-  }
+}
 
-  // render 完成后启动后台线程排剩余页
-  start_layout_thread();
+bool EpubReader::prepare_next_page(int (*cancel)(void *),void *context)
+{
+    if(preview_attempted||overlay_active||!parser||!parser->is_layout_done()||
+       m_layout_running||(cancel&&cancel(context)))return false;
+    preview_attempted=true;
+    update_page_count();
+    int next=state.current_page+1;
+    if(next>=state.pages_in_current_section||!renderer->begin_page_preview())return false;
+    uint32_t start=rt_tick_get();
+    if(!parser->render_text_preview(next,renderer,epub,cancel,context)) {
+        renderer->cancel_page_preview();return false;
+    }
+    render_progress(next);
+    rt_kprintf("READER_PREVIEW section=%u page=%d draw_ms=%u\n",state.current_section,next,rt_tick_get()-start);
+    // Caller adds status bar before asking the panel driver to prepare the wave.
+    return true;
 }
 
 void EpubReader::set_state_section(uint16_t current_section) {

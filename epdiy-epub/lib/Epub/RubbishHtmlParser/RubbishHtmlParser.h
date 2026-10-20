@@ -75,6 +75,7 @@ public:
     return blocks;
   }
   void render_page(int page_index, Renderer *renderer, Epub *epub);
+  bool render_text_preview(int index,Renderer *renderer,Epub *epub,int (*cancel)(void *),void *context);
 
   // 获取指定页面第一个元素的锚点（block 序号 + 行号）
   PageAnchor get_page_anchor(int page_index);

@@ -2,6 +2,7 @@
 #include "UIRegionsManager.h"
 #include "type.h"
 #include "reading_settings.h"
+#include "EpubList/EpubReader.h"
 #include <cstring>
 extern "C" {
 #include <finsh.h>
@@ -10,6 +11,7 @@ extern "C" {
 extern rt_mq_t ui_queue;
 extern Renderer *renderer;
 extern AppUIState ui_state;
+extern EpubListState epub_list_state;
 extern void handleUserInteraction(Renderer *,UIAction,bool);
 extern void back_to_main_page();
 enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER};
@@ -35,6 +37,7 @@ bool reader527_debug_message(uint32_t msg,Renderer *r)
         if(ui_state==USB_DFU_PAGE){reader527_dfu_hit=0;handleUserInteraction(r,SELECT,false);}
         return true;
     }
+    r->cancel_page_preview();
     if(msg==DEBUG_HOME){ui_state=MAIN_PAGE;}
     else if(msg==DEBUG_LIBRARY)ui_state=SELECTING_EPUB;
     else if(msg==DEBUG_SETTINGS)ui_state=SETTINGS_PAGE;
@@ -48,6 +51,10 @@ static int ui(int argc,char **argv)
 {
     if(!ui_queue||!renderer)return -RT_ENOSYS;
     if(argc==2&&!strcmp(argv[1],"status")) {
+        if(epub_list_state.num_epubs&&epub_list_state.selected_item<epub_list_state.num_epubs) {
+            const EpubListItem &book=epub_list_state.epub_list[epub_list_state.selected_item];
+            rt_kprintf("UI_BOOK section=%u page=%u pages=%u\n",book.current_section,book.current_page,book.pages_in_current_section);
+        }
         rt_kprintf("UI_STATUS state=%u width=684 height=1216 page=%d,%d margins=%d,%d\n",
             (unsigned)ui_state,renderer->get_page_width(),renderer->get_page_height(),renderer->get_margin_left(),renderer->get_margin_top());
         for(unsigned n=0;n<MAX_AREAS;++n) {

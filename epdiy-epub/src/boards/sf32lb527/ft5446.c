@@ -129,3 +129,4 @@ int board527_touch_init(void)
 void board527_touch_power(int on){if(initialized)control(&device,on?RTGRAPHIC_CTRL_POWERON:RTGRAPHIC_CTRL_POWEROFF,RT_NULL);}
 void board527_touch_lock(void){if(initialized)rt_mutex_take(&lock,RT_WAITING_FOREVER);}
 void board527_touch_unlock(void){if(initialized)rt_mutex_release(&lock);}
+int board527_touch_active(void){return tracker.active!=0;}

@@ -122,6 +122,12 @@ int toc_bottom_idx = 1; // 0:上一页,1:主页面,2:下一页
 int sel;
 int touch_sel;
 rt_mq_t ui_queue = RT_NULL;
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+static int reader_input_pending(void *)
+{
+    return (ui_queue&&ui_queue->entry)||board527_touch_active();
+}
+#endif
 
 void handleEpubTableContents(Renderer *renderer, UIAction action, bool needs_redraw);
 
@@ -1116,6 +1122,10 @@ void main_task(void *param)
       if(reader527_debug_message(msg_data,renderer))continue;
 #endif
       UIAction ui_action = (UIAction)msg_data;
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+      uint32_t action_begin=rt_tick_get(),action_reads=tf_msd_read_count();
+      if(ui_action!=DOWN)renderer->cancel_page_preview();
+#endif
     
       if (ui_action == MSG_UPDATE_CHARGE_STATUS)
       {       
@@ -1296,7 +1306,18 @@ void main_task(void *param)
       }
       request_flush();
 
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+      rt_kprintf("READER_ACTION action=%u total_ms=%u tf_read_sectors=%u\n",
+          (unsigned)ui_action,rt_tick_get()-action_begin,tf_msd_read_count()-action_reads);
+#endif
+
     } else {
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+      if(ui_state==READING_EPUB&&reader&&reader->prepare_next_page(reader_input_pending,RT_NULL)) {
+          draw_status_bar(renderer,battery);touch_controls->render(renderer);
+          renderer->end_page_preview(reader_input_pending,RT_NULL);
+      }
+#endif
       // ============================================================
       // rt_mq_recv 超时（500ms 无按键）— SD 卡电源管理
       // ============================================================
