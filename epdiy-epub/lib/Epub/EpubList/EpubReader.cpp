@@ -326,6 +326,14 @@ bool EpubReader::has_pending_layout()
 {
     return parser && !parser->is_layout_done();
 }
+bool EpubReader::can_auto_advance() const
+{
+    if(!epub||!parser||overlay_active)return false;
+    int count=epub->get_spine_items_count();
+    if(count<=0||state.current_section>=count)return false;
+    if(!parser->is_layout_done())return true;
+    return state.current_section+1<count||state.current_page+1<parser->get_page_count();
+}
 
 /*==========================================================================
  * 字体预热

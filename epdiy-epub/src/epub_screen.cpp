@@ -6,6 +6,8 @@
 #include "UIRegionsManager.h"
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
 #include "boards/sf32lb527/reader_ui.h"
+#include "reading_settings.h"
+#include "auto_turn.h"
 #endif
 
 
@@ -359,6 +361,14 @@ void render_settings_page(Renderer *renderer)
 int handleSettingsPage(Renderer *renderer, UIAction action, bool needs_redraw)
 {
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+  if(settings_selected_idx==SET_AUTO_TURN&&
+     (action==SELECT||action==SELECT_BOX||action==PREV_OPTION||action==NEXT_OPTION)) {
+    bool ok=reading_auto_turn_set(auto_turn_step(reading_auto_turn_seconds(),action!=PREV_OPTION));
+    g_touch_last_settings_row=-1;g_touch_last_settings_dir=0;
+    render_settings_page(renderer);
+    if(!ok)renderer->draw_text(24,renderer->get_page_height()-155,"保存失败，请检查 TF 卡");
+    return 0;
+  }
   if((action==SELECT_BOX||action==SELECT)&&settings_selected_idx==SET_FRONTLIGHT)return 3;
   if((action==SELECT_BOX||action==SELECT)&&settings_selected_idx==SET_USB_DFU)return 4;
   if(action==SELECT&&settings_selected_idx==SET_TOUCH) {

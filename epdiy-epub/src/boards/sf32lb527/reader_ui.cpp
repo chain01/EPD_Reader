@@ -2,6 +2,7 @@
 #include "UIRegionsManager.h"
 #include "epub_screen.h"
 #include "type.h"
+#include "reading_settings.h"
 #include <string>
 #include <algorithm>
 extern "C" {
@@ -53,9 +54,9 @@ void reader527_settings(Renderer *r)
 {
     clear_areas();r->clear_screen();int w=r->get_page_width(),h=r->get_page_height();
     label(r,0,20,w,64,"功能设置");
-    int side=16,arrow=56,gap=12,top=112,row=std::min(100,(h-290-6*gap)/7);
+    int side=16,arrow=56,gap=12,top=112,row=std::min(100,(h-290-7*gap)/8);
     int body_x=side+arrow,body_w=w-2*(side+arrow);
-    char texts[7][96];
+    char texts[8][96];
     rt_snprintf(texts[0],sizeof(texts[0]),"触控：已启用");
     int minutes=screen_get_timeout_shutdown_minutes();
     if(minutes)rt_snprintf(texts[1],sizeof(texts[1]),"待机：%d 分钟",minutes);
@@ -68,10 +69,13 @@ void reader527_settings(Renderer *r)
     unsigned cold=0,warm=0;board527_frontlight_get(&cold,&warm);
     rt_snprintf(texts[5],sizeof(texts[5]),"前光：冷 %u%% / 暖 %u%%",cold,warm);
     rt_snprintf(texts[6],sizeof(texts[6]),"USB 固件升级");
-    for(int i=0;i<7;++i) {
+    unsigned seconds=reading_auto_turn_seconds();
+    if(seconds)rt_snprintf(texts[7],sizeof(texts[7]),"自动翻页：%u 秒",seconds);
+    else rt_snprintf(texts[7],sizeof(texts[7]),"自动翻页：关闭");
+    for(int i=0;i<8;++i) {
         int y=top+i*(row+gap);
         button(r,i*3+2,body_x,y,body_w,row,texts[i],settings_selected_idx==i);
-        if(i>=SET_TIMEOUT&&i<=SET_BLUETOOTH) {
+        if((i>=SET_TIMEOUT&&i<=SET_BLUETOOTH)||i==SET_AUTO_TURN) {
             button(r,i*3,side,y,arrow-8,row,"-");
             button(r,i*3+1,w-side-arrow+8,y,arrow-8,row,"+");
         }

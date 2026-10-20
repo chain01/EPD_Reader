@@ -19,6 +19,7 @@
 #include "UIRegionsManager.h"
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
 #include "boards/sf32lb527/reader_ui.h"
+#include "auto_turn.h"
 #endif
 #if !defined(SF32LB57X) && !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
 #include "boards/battery/ADCBattery.h"
@@ -148,6 +149,11 @@ rt_mq_t ui_queue = RT_NULL;
 static int reader_input_pending(void *)
 {
     return (ui_queue&&ui_queue->entry)||board527_touch_active();
+}
+static bool auto_turn_eligible()
+{
+    return ui_state==READING_EPUB&&reader&&reader->can_auto_advance()&&
+        !board527_touch_active();
 }
 #endif
 
@@ -1118,6 +1124,7 @@ void main_task(void *param)
   screen_init(TIMEOUT_SHUTDOWN_TIME);
 
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+  AutoTurnClock auto_turn_clock;
   while (true) /* Touch wake remains available; physical hibernate routing is unverified. */
 #else
   while ((rt_tick_get_millisecond() - last_user_interaction < 60 * 1000 * 60 * TIMEOUT_SHUTDOWN_TIME))
@@ -1139,15 +1146,22 @@ void main_task(void *param)
     if (!epd_font_ft_preheat_is_running() &&
         !(ui_state==READING_EPUB && reader &&
           (reader->has_pending_layout() || reader->has_pending_preview()))) wait_ms = 5000;
+    wait_ms=auto_turn_clock.wait(rt_tick_get_millisecond(),reading_auto_turn_seconds(),auto_turn_eligible(),wait_ms);
     reader_power_idle();
 #endif
     int message_result = rt_mq_recv(ui_queue, &msg_data, sizeof(uint32_t), rt_tick_from_millisecond(wait_ms));
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
     reader_power_busy();
+    if(message_result!=RT_EOK&&!(ui_queue&&ui_queue->entry)&&
+       auto_turn_clock.take(rt_tick_get_millisecond(),reading_auto_turn_seconds(),auto_turn_eligible())) {
+        msg_data=DOWN;message_result=RT_EOK;
+        rt_kprintf("AUTO_TURN_FIRE seconds=%u tick_ms=%u\n",reading_auto_turn_seconds(),rt_tick_get_millisecond());
+    }
 #endif
     if (message_result == RT_EOK)
     {
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+      auto_turn_clock.reset(); // Restart after this action and its synchronous flush.
       if(reader527_debug_message(msg_data,renderer)) {
           last_user_interaction = rt_tick_get_millisecond();
           continue;

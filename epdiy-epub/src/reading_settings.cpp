@@ -12,6 +12,7 @@
  */
 
 #include "reading_settings.h"
+#include "auto_turn.h"
 #include <rtthread.h>
 #include <string.h>
 #include <stdio.h>
@@ -75,6 +76,18 @@ static int g_line_spacing_idx = 1;
 static int g_margin_idx = 1;
 static bool g_settings_changed = false;
 static bool g_font_changed = false;
+static unsigned g_auto_turn_seconds=0;
+unsigned reading_auto_turn_seconds(void){return g_auto_turn_seconds;}
+bool reading_auto_turn_set(unsigned seconds)
+{
+    if(!auto_turn_valid(seconds))return false;
+    if(seconds==g_auto_turn_seconds)return true;
+    unsigned previous=g_auto_turn_seconds;
+    g_auto_turn_seconds=seconds;
+    if(!reading_settings_save()){g_auto_turn_seconds=previous;return false;}
+    rt_kprintf("AUTO_TURN_SETTING seconds=%u saved=1\n",seconds);
+    return true;
+}
 
 /*==========================================================================
  * 辅助
@@ -133,12 +146,13 @@ bool reading_settings_save(void)
                        "font_size=%d\n"
                        "bold=%d\n"
                        "line_spacing=%d\n"
-                       "margin=%d\n",
+                       "margin=%d\n"
+                       "auto_turn_seconds=%u\n",
                        font_manager_get_name(g_font_type_idx),
                        FONT_SIZES[g_font_size_idx],
                        BOLD_LEVELS[g_bold_idx],
                        LINE_SPACINGS[g_line_spacing_idx],
-                       MARGINS[g_margin_idx]);
+                       MARGINS[g_margin_idx],g_auto_turn_seconds);
 
     bool ok=len>0&&len<(int)sizeof(buf);
     int written=0;
@@ -165,6 +179,7 @@ bool reading_settings_save(void)
 
 void reading_settings_load(Renderer *renderer)
 {
+    g_auto_turn_seconds=0; // Old/missing/invalid config keeps auto-turn disabled.
     char font_name[48] = {0};
     int font_size = 0, bold = 0, line_spacing = 0, margin = 0;
     bool file_loaded = false;
@@ -191,6 +206,8 @@ void reading_settings_load(Renderer *renderer)
                     line_spacing = atoi(line + 13);
                 } else if (strncmp(line, "margin=", 7) == 0) {
                     margin = atoi(line + 7);
+                } else if (strncmp(line,"auto_turn_seconds=",18)==0) {
+                    g_auto_turn_seconds=auto_turn_parse(line+18);
                 }
                 line = strtok(NULL, "\n");
             }
@@ -203,6 +220,7 @@ void reading_settings_load(Renderer *renderer)
         rt_kprintf("[settings] No config file, using defaults\n");
         return;
     }
+    rt_kprintf("AUTO_TURN_LOADED seconds=%u\n",g_auto_turn_seconds);
 
     rt_kprintf("[settings] Loaded: font=%s size=%d bold=%d spacing=%d margin=%d\n",
                font_name, font_size, bold, line_spacing, margin);

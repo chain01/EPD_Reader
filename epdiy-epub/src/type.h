@@ -12,7 +12,8 @@ typedef enum {
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
   SET_FRONTLIGHT = 5,
   SET_USB_DFU = 6,
-  SET_CONFIRM = 7
+  SET_AUTO_TURN = 7,
+  SET_CONFIRM = 8
 #else
   SET_CONFIRM = 5
 #endif

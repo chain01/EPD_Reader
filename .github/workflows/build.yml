@@ -42,6 +42,7 @@ jobs:
       run: |
         python3 tools/test_527_cache.py
         python3 tools/test_settings_save.py
+        python3 tools/test_auto_turn.py
         python3 tools/test_font_io.py
         python3 tools/test_reader_reflow.py
         python3 tools/test_527_power_measure.py

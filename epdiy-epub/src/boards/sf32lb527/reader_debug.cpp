@@ -11,6 +11,7 @@ extern "C" {
 extern rt_mq_t ui_queue;
 extern Renderer *renderer;
 extern AppUIState ui_state;
+extern int settings_selected_idx;
 extern EpubListState epub_list_state;
 extern void handleUserInteraction(Renderer *,UIAction,bool);
 extern void back_to_main_page();
@@ -22,7 +23,7 @@ extern int reader527_amp_measure(Renderer *,int);
 extern int reader527_minimum_power(Renderer *,bool);
 extern int reader527_power_steps(Renderer *,unsigned);
 extern int reader527_touch_states(Renderer *,unsigned);
-enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER,DEBUG_POWER,DEBUG_POWER_QUICK,DEBUG_LCPU,DEBUG_LCPU_QUICK,DEBUG_RAIL,DEBUG_RAIL_QUICK,DEBUG_AMP,DEBUG_AMP_QUICK,DEBUG_MINIMUM,DEBUG_MINIMUM_TEST,DEBUG_STEPS,DEBUG_STEPS_QUICK,DEBUG_TOUCH_STATES,DEBUG_TOUCH_STATES_QUICK};
+enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER,DEBUG_POWER,DEBUG_POWER_QUICK,DEBUG_LCPU,DEBUG_LCPU_QUICK,DEBUG_RAIL,DEBUG_RAIL_QUICK,DEBUG_AMP,DEBUG_AMP_QUICK,DEBUG_MINIMUM,DEBUG_MINIMUM_TEST,DEBUG_STEPS,DEBUG_STEPS_QUICK,DEBUG_TOUCH_STATES,DEBUG_TOUCH_STATES_QUICK,DEBUG_AUTO_OFF,DEBUG_AUTO_10,DEBUG_AUTO_15,DEBUG_AUTO_20,DEBUG_AUTO_FOCUS};
 static void dump_frame(void)
 {
     const uint8_t *frame=board527_framebuffer();const unsigned size=1216*684/2;
@@ -39,7 +40,17 @@ static void dump_frame(void)
 }
 bool reader527_debug_message(uint32_t msg,Renderer *r)
 {
-    if(msg<DEBUG_HOME||msg>DEBUG_TOUCH_STATES_QUICK)return false;
+    if(msg<DEBUG_HOME||msg>DEBUG_AUTO_FOCUS)return false;
+    if(msg>=DEBUG_AUTO_OFF&&msg<=DEBUG_AUTO_20) {
+        const unsigned seconds[]={0,10,15,20};
+        bool ok=reading_auto_turn_set(seconds[msg-DEBUG_AUTO_OFF]);
+        rt_kprintf("AUTO_TURN_DEBUG seconds=%u rc=%d\n",reading_auto_turn_seconds(),ok?0:-1);return true;
+    }
+    if(msg==DEBUG_AUTO_FOCUS) {
+        settings_selected_idx=SET_AUTO_TURN;ui_state=SETTINGS_PAGE;
+        handleUserInteraction(r,NONE,true);r->flush_display();
+        rt_kprintf("AUTO_TURN_FOCUS seconds=%u\n",reading_auto_turn_seconds());return true;
+    }
     if(msg==DEBUG_TOUCH_STATES||msg==DEBUG_TOUCH_STATES_QUICK) {
         reader527_touch_states(r,msg==DEBUG_TOUCH_STATES?120:5);return true;
     }
@@ -92,6 +103,7 @@ static int ui(int argc,char **argv)
             const EpubListItem &book=epub_list_state.epub_list[epub_list_state.selected_item];
             rt_kprintf("UI_BOOK section=%u page=%u pages=%u\n",book.current_section,book.current_page,book.pages_in_current_section);
         }
+        rt_kprintf("AUTO_TURN_STATUS seconds=%u\n",reading_auto_turn_seconds());
         rt_kprintf("UI_STATUS state=%u width=684 height=1216 page=%d,%d margins=%d,%d\n",
             (unsigned)ui_state,renderer->get_page_width(),renderer->get_page_height(),renderer->get_margin_left(),renderer->get_margin_top());
         for(unsigned n=0;n<MAX_AREAS;++n) {
@@ -102,7 +114,7 @@ static int ui(int argc,char **argv)
         return 0;
     }
     if(argc==2) {
-        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter","power","power-quick","lp-power","lp-power-quick","rail-power","rail-power-quick","amp-power","amp-power-quick","min-power","min-power-test","power-steps","power-steps-quick","touch-power","touch-power-quick"};
+        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter","power","power-quick","lp-power","lp-power-quick","rail-power","rail-power-quick","amp-power","amp-power-quick","min-power","min-power-test","power-steps","power-steps-quick","touch-power","touch-power-quick","auto-off","auto-10","auto-15","auto-20","auto-settings"};
         for(unsigned n=0;n<sizeof(names)/sizeof(names[0]);++n)if(!strcmp(argv[1],names[n])) {
             uint32_t msg=DEBUG_HOME+n;return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
@@ -112,6 +124,6 @@ static int ui(int argc,char **argv)
             uint32_t msg=values[n];return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
     }
-    rt_kprintf("ui home/library/settings/light/reading/dump/dfu/dfu-enter/power/power-quick/lp-power/lp-power-quick/rail-power/rail-power-quick/amp-power/amp-power-quick/min-power/min-power-test/power-steps/power-steps-quick/touch-power/touch-power-quick/status/prev/next/select/menu\n");return -RT_EINVAL;
+    rt_kprintf("ui home/library/settings/light/reading/dump/dfu/dfu-enter/power/power-quick/lp-power/lp-power-quick/rail-power/rail-power-quick/amp-power/amp-power-quick/min-power/min-power-test/power-steps/power-steps-quick/touch-power/touch-power-quick/auto-off/auto-10/auto-15/auto-20/auto-settings/status/prev/next/select/menu\n");return -RT_EINVAL;
 }
 MSH_CMD_EXPORT(ui, Reader UI diagnostics);

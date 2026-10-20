@@ -34,6 +34,7 @@ static void rt_kprintf(const char *fmt,...){if(strstr(fmt,"[settings] Saved:"))+
 static const char *font_manager_get_name(int){return "Default";}
 static const int FONT_SIZES[]={32},BOLD_LEVELS[]={0},LINE_SPACINGS[]={12},MARGINS[]={8};
 static int g_font_type_idx,g_font_size_idx,g_bold_idx,g_line_spacing_idx,g_margin_idx;
+static unsigned g_auto_turn_seconds=15;
 #define open mock_open
 #define write mock_write
 #define fsync mock_fsync
@@ -47,7 +48,7 @@ int main(){
         assert(ok==(failure==0));assert(saved==(failure==0));
         assert(closed==(failure==1?0:1));
         if(!failure){assert(write_calls>1);assert(content==
-          "font_name=Default\nfont_size=32\nbold=0\nline_spacing=12\nmargin=8\n");}
+          "font_name=Default\nfont_size=32\nbold=0\nline_spacing=12\nmargin=8\nauto_turn_seconds=15\n");}
     }
     puts("SETTINGS_PARTIAL_WRITE_AND_FAILURE_PASS");
 }

@@ -25,5 +25,7 @@ void reading_settings_load(Renderer *renderer);
 
 /* 设置当前选中项索引（供触控回调使用） */
 void reading_settings_set_current_item(int index);
+unsigned reading_auto_turn_seconds(void);
+bool reading_auto_turn_set(unsigned seconds);
 
 #endif /* READING_SETTINGS_H */

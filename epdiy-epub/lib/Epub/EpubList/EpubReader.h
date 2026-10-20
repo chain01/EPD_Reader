@@ -66,6 +66,7 @@ public:
   // 后台排版（主循环空闲时调用）
   bool continue_layout();
   bool has_pending_layout();
+  bool can_auto_advance() const;
   bool has_pending_preview() const { return !overlay_active && !preview_attempted; }
 
   // 保存当前阅读位置的锚点（进入设置前调用）
