@@ -48,6 +48,9 @@ jobs:
         python3 tools/test_527_power_measure.py
         python3 tools/test_527_lcpu_sleep.py
         python3 tools/test_527_minimum_power.py
+        python3 tools/test_527_standby_clock.py
+        python3 tools/test_527_standby_resume.py
+        python3 tools/test_527_clock_ram.py
         python3 tools/test_527_power_steps.py
         python3 tools/test_527_power_boot.py
         python3 tools/test_527_touch_power.py

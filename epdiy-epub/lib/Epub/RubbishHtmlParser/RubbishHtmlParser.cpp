@@ -425,7 +425,7 @@ PageAnchor RubbishHtmlParser::get_page_anchor(int page_index)
  * 对于 TextBlock，尽量找到包含 anchor.line_index 对应文本的页
  * （但由于字体变化，行号可能不同，所以匹配到同一个 block 就算成功）。
  *========================================================================*/
-int RubbishHtmlParser::find_page_by_anchor(const PageAnchor &anchor)
+int RubbishHtmlParser::find_page_by_anchor(const PageAnchor &anchor, bool exact_line)
 {
   // 先根据 block_index 找到目标 block 指针
   Block *target_block = nullptr;
@@ -444,7 +444,7 @@ int RubbishHtmlParser::find_page_by_anchor(const PageAnchor &anchor)
   for (int p = 0; p < (int)pages.size(); p++) {
     for (auto elem : pages[p]->elements) {
       PageLine *pl = dynamic_cast<PageLine *>(elem);
-      if (pl && pl->block == target_block) {
+      if (pl && pl->block == target_block && (!exact_line||pl->line_break_index>=anchor.line_index)) {
         rt_mutex_release(m_pages_mutex);
         return p;
       }

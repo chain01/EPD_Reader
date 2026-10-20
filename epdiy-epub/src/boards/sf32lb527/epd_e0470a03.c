@@ -235,9 +235,11 @@ L1_RET_CODE_SECT(epd527, __attribute__((noinline)) static int scan_frame(void))
 static uint32_t prep_cycles[7];
 static void report_preparation(void)
 {
+#if BOARD527_VERBOSE_LOGS
     rt_kprintf("EPD527_PROFILE map_us=%u lut_us=%u reuse_us=%u pack_us=%u encode_us=%u lookup_us=%u promote_us=%u\n",
         prep_cycles[0]/240,prep_cycles[1]/240,prep_cycles[2]/240,prep_cycles[3]/240,
         prep_cycles[4]/240,prep_cycles[5]/240,prep_cycles[6]/240);
+#endif
 }
 static int extend_cache(unsigned needed)
 {
@@ -579,33 +581,50 @@ static int drive(unsigned mode)
     unsigned count=hit?prepared_count:waveform_bin_reader_get_frames(temperature,(WAVE_TABLE_MODE_T)mode);
     prepared=0;
     if(!count||count>MAX_PHASES)return -1;
-    uint32_t begin=rt_tick_get(),scan_cycles=0,expand_cycles=0,visible_ms=0,first_scan_ms=0;unsigned done=0;
+    uint32_t begin=rt_tick_get(),scan_cycles=0;unsigned done=0;
+#if BOARD527_VERBOSE_LOGS
+    uint32_t expand_cycles=0,visible_ms=0,first_scan_ms=0;
+#endif
     if(!hit&&prepare_phases(count)) {
         ++errors;rt_kprintf("EPD527_CACHE_FULL HV=OFF rows=%u bytes=%u\n",cached_rows,cache_used);
         release_extra_cache();return -RT_ENOMEM;
     }
-    if(!hit){promote_raw_cache();report_preparation();}unsigned prep_ms=rt_tick_get()-begin;
+    if(!hit){promote_raw_cache();report_preparation();}
+#if BOARD527_VERBOSE_LOGS
+    unsigned prep_ms=rt_tick_get()-begin;
+#endif
     memset(full_frame,0,sizeof(full_frame));aborted=0;
     rt_timer_start(&cutoff);
     if(tps_exit_sleep()!=RT_EOK){aborted=1;goto cleanup;}
     for(unsigned f=0;f<count;++f) {
         active_phase=f;
-        uint32_t tick=HAL_DBG_DWT_GetCycles();if(!raw_cache)expand_phase(f);
-        expand_cycles+=HAL_DBG_DWT_GetCycles()-tick;
+#if BOARD527_VERBOSE_LOGS
+        uint32_t expand_tick=HAL_DBG_DWT_GetCycles();
+#endif
+        if(!raw_cache)expand_phase(f);
+#if BOARD527_VERBOSE_LOGS
+        expand_cycles+=HAL_DBG_DWT_GetCycles()-expand_tick;
         if(f==0)first_scan_ms=rt_tick_get()-begin;
-        tick=HAL_DBG_DWT_GetCycles();
+#endif
+        uint32_t tick=HAL_DBG_DWT_GetCycles();
         rt_enter_critical();int rc=scan_frame();rt_exit_critical();
         scan_cycles+=HAL_DBG_DWT_GetCycles()-tick;
         if(rc){aborted=1;break;}++done;
     }
 cleanup:
+#if BOARD527_VERBOSE_LOGS
     visible_ms=rt_tick_get()-begin;
+#endif
     idle();HAL_Delay_us(20);
     int power_rc=tps_enter_sleep();rt_timer_stop(&cutoff);
-    unsigned borrowed=extra_bytes;release_extra_cache();
-    if(aborted||power_rc){++errors;previous_known=0;return -1;}
+#if BOARD527_VERBOSE_LOGS
+    unsigned borrowed=extra_bytes;
+#endif
+    release_extra_cache();
+    if(aborted||power_rc){++errors;previous_known=0;rt_kprintf("EPD527_REFRESH_FAIL mode=%u frames=%u power_rc=%d aborted=%d\n",mode,done,power_rc,aborted);return -1;}
     ++draws;frames_total+=done;last_frames=done;last_ms=rt_tick_get()-begin;
     last_scan_us=done?scan_cycles/240/done:0;
+#if BOARD527_VERBOSE_LOGS
     rt_kprintf("EPD527_REFRESH mode=%u frames=%u ms=%u prep_ms=%u scan_us=%u expand_us=%u errors=%u HV=OFF\n",
         mode,done,last_ms,prep_ms,last_scan_us,done?expand_cycles/240/done:0,errors);
     rt_kprintf("EPD527_CACHE input_rows=%u stored_rows=%u bytes=%u raw=%u full_screen=1\n",unique_rows,cached_rows,cache_used,raw_cache);
@@ -614,6 +633,7 @@ cleanup:
     rt_kprintf("EPD527_MEMORY borrowed=%u released=1\n",borrowed);
     rt_kprintf("EPD527_DICTIONARY enabled=%u words=%u\n",dictionary_mode,dictionary_count);
     rt_kprintf("EPD527_PREFETCH hit=%u saved_ms=%u first_scan_ms=%u\n",hit,saved_ms,first_scan_ms);
+#endif
     return 0;
 }
 static void lock_devices(void)
@@ -668,7 +688,9 @@ int board527_display_prepare(const uint8_t *gray4,int (*cancel)(void *),void *co
     prepared_ms=rt_tick_get()-begin;prepared_index=refresh_index;
     report_preparation();
     if(rc)discard_prepared();
+#if BOARD527_VERBOSE_LOGS
     rt_kprintf("EPD527_PREPARED ready=%u ms=%u raw=%u borrowed=%u HV=OFF\n",!rc,prepared_ms,raw_cache,extra_bytes);
+#endif
     rt_mutex_release(&lock);return rc;
 }
 int board527_display_present(const uint8_t *gray4)
@@ -727,6 +749,20 @@ int board527_display_init(void)
     return ready?0:-1;
 }
 void board527_display_off(void){idle();}
+void board527_clock_seed(const uint8_t *gray4)
+{
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);discard_prepared();
+    for(unsigned i=0;i<W*H;++i)mixed[i]=(gray4[i/2]>>((i&1)*4))&15;
+    previous_known=1;rt_mutex_release(&lock);
+}
+int board527_clock_present(const uint8_t *gray4,int full)
+{
+    unsigned saved_period=full_period,saved_index=refresh_index;
+    full_period=full?0:11;refresh_index=full?0:1;
+    int rc=board527_display_present(gray4);
+    full_period=saved_period;refresh_index=saved_index;
+    return rc;
+}
 uint8_t *board527_framebuffer(void){return reader_frame;}
 void set_part_disp_times(int count)
 {

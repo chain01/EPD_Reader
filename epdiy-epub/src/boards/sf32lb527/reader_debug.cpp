@@ -1,4 +1,5 @@
 #include "reader_ui.h"
+#include "standby_clock.h"
 #include "UIRegionsManager.h"
 #include "type.h"
 #include "reading_settings.h"
@@ -23,7 +24,7 @@ extern int reader527_amp_measure(Renderer *,int);
 extern int reader527_minimum_power(Renderer *,bool);
 extern int reader527_power_steps(Renderer *,unsigned);
 extern int reader527_touch_states(Renderer *,unsigned);
-enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER,DEBUG_POWER,DEBUG_POWER_QUICK,DEBUG_LCPU,DEBUG_LCPU_QUICK,DEBUG_RAIL,DEBUG_RAIL_QUICK,DEBUG_AMP,DEBUG_AMP_QUICK,DEBUG_MINIMUM,DEBUG_MINIMUM_TEST,DEBUG_STEPS,DEBUG_STEPS_QUICK,DEBUG_TOUCH_STATES,DEBUG_TOUCH_STATES_QUICK,DEBUG_AUTO_OFF,DEBUG_AUTO_10,DEBUG_AUTO_15,DEBUG_AUTO_20,DEBUG_AUTO_FOCUS};
+enum {DEBUG_HOME=0x52710000,DEBUG_LIBRARY,DEBUG_SETTINGS,DEBUG_LIGHT,DEBUG_READING,DEBUG_DUMP,DEBUG_DFU,DEBUG_DFU_ENTER,DEBUG_POWER,DEBUG_POWER_QUICK,DEBUG_LCPU,DEBUG_LCPU_QUICK,DEBUG_RAIL,DEBUG_RAIL_QUICK,DEBUG_AMP,DEBUG_AMP_QUICK,DEBUG_MINIMUM,DEBUG_MINIMUM_TEST,DEBUG_STEPS,DEBUG_STEPS_QUICK,DEBUG_TOUCH_STATES,DEBUG_TOUCH_STATES_QUICK,DEBUG_AUTO_OFF,DEBUG_AUTO_10,DEBUG_AUTO_15,DEBUG_AUTO_20,DEBUG_AUTO_FOCUS,DEBUG_STANDBY,DEBUG_STANDBY_TEST,DEBUG_CLOCK_PREVIEW,DEBUG_CLOCK_RAM,DEBUG_CLOCK_RAM_TEST};
 static void dump_frame(void)
 {
     const uint8_t *frame=board527_framebuffer();const unsigned size=1216*684/2;
@@ -40,7 +41,13 @@ static void dump_frame(void)
 }
 bool reader527_debug_message(uint32_t msg,Renderer *r)
 {
-    if(msg<DEBUG_HOME||msg>DEBUG_AUTO_FOCUS)return false;
+    if(msg<DEBUG_HOME||msg>DEBUG_CLOCK_RAM_TEST)return false;
+    if(msg==DEBUG_CLOCK_RAM||msg==DEBUG_CLOCK_RAM_TEST){reader527_standby_ram(r,msg==DEBUG_CLOCK_RAM_TEST);reader527_standby_ram_take_restored();return true;}
+    if(msg==DEBUG_CLOCK_PREVIEW){ui_state=SETTINGS_PAGE;reader527_standby_preview(r);return true;}
+    if(msg==DEBUG_STANDBY||msg==DEBUG_STANDBY_TEST) {
+        int rc=reader527_standby_enter(r,msg==DEBUG_STANDBY_TEST);
+        rt_kprintf("CLOCK_ENTRY_RESULT rc=%d\n",rc);return true;
+    }
     if(msg>=DEBUG_AUTO_OFF&&msg<=DEBUG_AUTO_20) {
         const unsigned seconds[]={0,10,15,20};
         bool ok=reading_auto_turn_set(seconds[msg-DEBUG_AUTO_OFF]);
@@ -114,7 +121,7 @@ static int ui(int argc,char **argv)
         return 0;
     }
     if(argc==2) {
-        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter","power","power-quick","lp-power","lp-power-quick","rail-power","rail-power-quick","amp-power","amp-power-quick","min-power","min-power-test","power-steps","power-steps-quick","touch-power","touch-power-quick","auto-off","auto-10","auto-15","auto-20","auto-settings"};
+        const char *names[]={"home","library","settings","light","reading","dump","dfu","dfu-enter","power","power-quick","lp-power","lp-power-quick","rail-power","rail-power-quick","amp-power","amp-power-quick","min-power","min-power-test","power-steps","power-steps-quick","touch-power","touch-power-quick","auto-off","auto-10","auto-15","auto-20","auto-settings","standby","standby-test","clock-preview","clock-ram","clock-ram-test"};
         for(unsigned n=0;n<sizeof(names)/sizeof(names[0]);++n)if(!strcmp(argv[1],names[n])) {
             uint32_t msg=DEBUG_HOME+n;return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
@@ -124,6 +131,6 @@ static int ui(int argc,char **argv)
             uint32_t msg=values[n];return rt_mq_send(ui_queue,&msg,sizeof(msg));
         }
     }
-    rt_kprintf("ui home/library/settings/light/reading/dump/dfu/dfu-enter/power/power-quick/lp-power/lp-power-quick/rail-power/rail-power-quick/amp-power/amp-power-quick/min-power/min-power-test/power-steps/power-steps-quick/touch-power/touch-power-quick/auto-off/auto-10/auto-15/auto-20/auto-settings/status/prev/next/select/menu\n");return -RT_EINVAL;
+    rt_kprintf("ui home/library/settings/light/reading/dump/dfu/dfu-enter/power/power-quick/lp-power/lp-power-quick/rail-power/rail-power-quick/amp-power/amp-power-quick/min-power/min-power-test/power-steps/power-steps-quick/touch-power/touch-power-quick/auto-off/auto-10/auto-15/auto-20/auto-settings/standby/standby-test/clock-preview/clock-ram/clock-ram-test/status/prev/next/select/menu\n");return -RT_EINVAL;
 }
 MSH_CMD_EXPORT(ui, Reader UI diagnostics);

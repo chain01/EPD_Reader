@@ -126,8 +126,9 @@ bool EpubReader::load()
     if (epub->load())
     {
       ulog_d(TAG, "After epub load: %d", heap_free_size());
-      return false;
+      return true;
     }
+    return false;
   }
   return true;
 }
@@ -399,7 +400,7 @@ void EpubReader::save_anchor(int &out_block_index, int &out_line_index)
            state.current_page, out_block_index, out_line_index);
 }
 
-void EpubReader::restore_by_anchor(int block_index, int line_index)
+void EpubReader::restore_by_anchor(int block_index, int line_index, bool exact_line)
 {
     uint32_t start = rt_tick_get();
     if (!parser) parse_and_layout_current_section();
@@ -408,9 +409,12 @@ void EpubReader::restore_by_anchor(int block_index, int line_index)
     anchor.block_index = block_index;
     anchor.line_index = line_index;
     int new_page;
-    while ((new_page = parser->find_page_by_anchor(anchor)) < 0 && !parser->is_layout_done()) {
+    while (!parser->is_layout_done()) {
+        new_page=parser->find_page_by_anchor(anchor,exact_line);
+        if(new_page>=0&&(!exact_line||new_page<parser->get_page_count()-1))break;
         parser->layout_continue(1);
     }
+    new_page=parser->find_page_by_anchor(anchor,exact_line);
     update_page_count();
     rt_kprintf("FONT_ANCHOR ms=%u pages_ready=%d\n", rt_tick_get()-start, parser->get_page_count());
     if (new_page >= 0) {

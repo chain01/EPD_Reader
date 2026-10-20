@@ -1632,7 +1632,8 @@ static int pm_resume(void)
     if(!rc)rc=pm_identify(0);
     pm_restoring=0;
     if(rc)pm_fault=1;else ++pm_resumes;
-    rt_kprintf("TF_PM_REINIT rc=%d ms=%u count=%u identity_ok=%u\n",rc,rt_tick_get()-begin,pm_resumes,!rc);
+    if(rc||BOARD527_VERBOSE_LOGS)
+        rt_kprintf("TF_PM_REINIT rc=%d ms=%u count=%u identity_ok=%u\n",rc,rt_tick_get()-begin,pm_resumes,!rc);
     return rc;
 }
 int tf_msd_prepare_off(void)

@@ -94,6 +94,10 @@ int reader527_steps_quiet_start()
     if(!rc)rc=quiet_network(1);
     return rc;
 }
+int reader527_steps_quiet_finish()
+{
+    int net=quiet_network(0),lp=quiet_lcpu(0);return net?net:lp;
+}
 
 static void card(Renderer *r,const char *stage,const char *touch,const char *network,int seconds,const char *version="POWER TEST R26")
 {

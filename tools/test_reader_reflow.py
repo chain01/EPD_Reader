@@ -74,7 +74,7 @@ public:
     void layout(Renderer *,Epub *,int);
     void layout_continue(int);
     PageAnchor get_page_anchor(int);
-    int find_page_by_anchor(const PageAnchor &);
+    int find_page_by_anchor(const PageAnchor &,bool=false);
 };
 '''
 tests=r'''
@@ -100,6 +100,7 @@ int main(){
             }
             assert(live_elements==4*lines);assert(live_pages==(int)p.pages.size());
             assert(p.get_page_anchor(0).block_index==0);
+            for(int n=0;n<(int)p.pages.size();++n){auto anchor=p.get_page_anchor(n);assert(p.find_page_by_anchor(anchor,true)==n);}
         }
     }
     assert(live_pages==0&&live_elements==0);

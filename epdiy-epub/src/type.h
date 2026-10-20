@@ -13,7 +13,8 @@ typedef enum {
   SET_FRONTLIGHT = 5,
   SET_USB_DFU = 6,
   SET_AUTO_TURN = 7,
-  SET_CONFIRM = 8
+  SET_STANDBY = 8,
+  SET_CONFIRM = 9
 #else
   SET_CONFIRM = 5
 #endif

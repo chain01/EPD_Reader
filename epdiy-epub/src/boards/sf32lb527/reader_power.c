@@ -12,6 +12,7 @@
 static uint32_t entered, exits, slept_ms, longest_ms, start_ms;
 static int forced_awake;
 static struct rt_timer test_timer;
+static int test_timer_ready;
 
 static void diagnostic_hold(int hold)
 {
@@ -31,7 +32,7 @@ void board527_power_hold(void) { diagnostic_hold(1); }
 
 void board527_power_auto(void)
 {
-    rt_timer_stop(&test_timer);
+    if(test_timer_ready)rt_timer_stop(&test_timer);
     diagnostic_hold(0);
 }
 void board527_power_stats(uint32_t *enters,uint32_t *sleep_ms)
@@ -58,6 +59,7 @@ static void notify(uint8_t event, uint8_t mode, void *data)
 
 static int pwr(int argc, char **argv)
 {
+    if(!test_timer_ready){rt_kprintf("PWR_NOT_READY\n");return -RT_ENOSYS;}
     if (argc == 2 && !strcmp(argv[1], "off")) {
         rt_timer_stop(&test_timer); diagnostic_hold(1);
     } else if (argc == 2 && !strcmp(argv[1], "on")) {
@@ -83,6 +85,7 @@ int board527_power_init(void)
     // Always initialize diagnostic state, including the missing-touch path.
     rt_timer_init(&test_timer,"pwrtest",test_finished,RT_NULL,
                   rt_tick_from_millisecond(10000),RT_TIMER_FLAG_ONE_SHOT);
+    test_timer_ready=1;
     rt_pm_notify_set(notify, RT_NULL);
     /* PA44 is HPAON PIN20 on SF32LB52x. Keep its GPIO IRQ enabled as well. */
     int rc = pm_enable_pin_wakeup(20, AON_PIN_MODE_NEG_EDGE);

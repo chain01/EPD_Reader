@@ -126,7 +126,8 @@ int board527_steps_aw(int reset_hold,int logic_on)
 steps_aw_done:
     aw_ready=!rc;
     rt_mutex_release(&aw_lock);
-    rt_kprintf("STEP_AW reset=0 logic=%d id=%02x p0=%02x p1=%02x rc=%d\n",logic_on,id,p0,p1,rc);
+    if(rc||BOARD527_VERBOSE_LOGS)
+        rt_kprintf("STEP_AW reset=0 logic=%d id=%02x p0=%02x p1=%02x rc=%d\n",logic_on,id,p0,p1,rc);
     return rc;
 }
 static uint8_t test_p1_out,test_p1_dir;
@@ -156,7 +157,9 @@ int board527_amplifier_test(int mute)
         if(!rc)test_amp_saved=0;
     } else rc=0;
 amp_done:
-    rt_mutex_release(&aw_lock);board527_amplifier_report();return rc;
+    rt_mutex_release(&aw_lock);
+    if(rc||BOARD527_VERBOSE_LOGS)board527_amplifier_report();
+    return rc;
 }
 int board527_logic_rail_test(int off)
 {
@@ -192,7 +195,8 @@ int board527_minimum_external_off(void)
            reg_write(aw_bus,0x59,4,0x27)|reg_write(aw_bus,0x59,5,0x07);
     rc|=reg_read(aw_bus,0x59,0,&in0)|reg_read(aw_bus,0x59,1,&in1);
     if((in0&0xd8)||(in1&0xf8))rc=-RT_ERROR;
-    rt_kprintf("MINPOWER_AW enables_low=%d P0=%02x P1=%02x rc=%d\n",!rc,in0,in1,rc);
+    if(rc||BOARD527_VERBOSE_LOGS)
+        rt_kprintf("MINPOWER_AW enables_low=%d P0=%02x P1=%02x rc=%d\n",!rc,in0,in1,rc);
     rt_mutex_release(&aw_lock);return rc;
 }
 int board_touch_gpio_report(void)
@@ -290,7 +294,10 @@ rt_err_t tps_exit_sleep(void)
         if(fault&1) {
             if(ge(4,1))goto fail;
             powered=1;++cycles;rt_thread_mdelay(10);
-            rt_kprintf("SY7636_POWER_OK fault=%02x cycle=%u\n",fault,cycles);return RT_EOK;
+#if BOARD527_VERBOSE_LOGS
+            rt_kprintf("SY7636_POWER_OK fault=%02x cycle=%u\n",fault,cycles);
+#endif
+            return RT_EOK;
         }
         rt_thread_mdelay(5);
     }

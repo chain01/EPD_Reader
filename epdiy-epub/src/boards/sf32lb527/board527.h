@@ -3,6 +3,10 @@
 #define EPD_READER_BOARD527_H
 #include <stdint.h>
 #include "epd_tps.h"
+/* Enable detailed per-refresh/per-minute timing only for diagnostics. */
+#ifndef BOARD527_VERBOSE_LOGS
+#define BOARD527_VERBOSE_LOGS 0
+#endif
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -13,6 +17,8 @@ int board527_display_prepare(const uint8_t *gray4,int (*cancel)(void *),void *co
 void board527_display_cancel_prepare(void);
 uint8_t *board527_framebuffer(void);
 void board527_display_off(void);
+void board527_clock_seed(const uint8_t *gray4);
+int board527_clock_present(const uint8_t *gray4,int full);
 int board527_touch_init(void);
 void board527_touch_power(int on);
 void board527_touch_lock(void);

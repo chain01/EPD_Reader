@@ -41,7 +41,9 @@ static int wake_locked(void)
     if(!rail_off)return 0;
     if(board527_logic_power(1)){++errors;return -RT_EIO;}
     rt_thread_mdelay(10);restore();rail_off=0;++wakes;
+#if BOARD527_VERBOSE_LOGS
     rt_kprintf("TF_PM_WAKE rail=1 card_reinit=deferred count=%u\n",wakes);
+#endif
     return 0;
 }
 void board527_io_init(void)
@@ -97,8 +99,13 @@ int board527_storage_idle(int force)
         tf_msd_power_lost();
         rc=board527_logic_power(0);
         rail_off=1;
-        if(!rc){++sleeps;rt_kprintf("TF_PM_SLEEP rail=0 count=%u mounted_state=retained idle_ms=%u tick_ms=%u\n",
-            sleeps,(unsigned)((uint64_t)(rt_tick_t)(rt_tick_get()-last_use)*1000/RT_TICK_PER_SECOND),rt_tick_get_millisecond());}
+        if(!rc){
+            ++sleeps;
+#if BOARD527_VERBOSE_LOGS
+            rt_kprintf("TF_PM_SLEEP rail=0 count=%u mounted_state=retained idle_ms=%u tick_ms=%u\n",
+                sleeps,(unsigned)((uint64_t)(rt_tick_t)(rt_tick_get()-last_use)*1000/RT_TICK_PER_SECOND),rt_tick_get_millisecond());
+#endif
+        }
         else {automatic=0;++errors;(void)wake_locked();}
     } else {automatic=0;++errors;}
     if(rc)rt_kprintf("TF_PM_SUSPEND_FAIL rc=%d auto=0\n",rc);

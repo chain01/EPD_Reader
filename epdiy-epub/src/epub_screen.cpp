@@ -8,6 +8,7 @@
 #include "boards/sf32lb527/reader_ui.h"
 #include "reading_settings.h"
 #include "auto_turn.h"
+#include "boards/sf32lb527/standby_clock.h"
 #endif
 
 
@@ -361,6 +362,12 @@ void render_settings_page(Renderer *renderer)
 int handleSettingsPage(Renderer *renderer, UIAction action, bool needs_redraw)
 {
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+  if(settings_selected_idx==SET_STANDBY&&(action==SELECT||action==SELECT_BOX)) {
+    if(reader527_standby_ram(renderer,false)) {
+      render_settings_page(renderer);renderer->draw_text(24,renderer->get_page_height()-155,"待机失败，请检查 TF 卡");
+    }
+    return 0;
+  }
   if(settings_selected_idx==SET_AUTO_TURN&&
      (action==SELECT||action==SELECT_BOX||action==PREV_OPTION||action==NEXT_OPTION)) {
     bool ok=reading_auto_turn_set(auto_turn_step(reading_auto_turn_seconds(),action!=PREV_OPTION));

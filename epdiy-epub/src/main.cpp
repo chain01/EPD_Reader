@@ -18,7 +18,9 @@
 #include "ulog.h"
 #include "UIRegionsManager.h"
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#include "boards/sf32lb527/board527.h"
 #include "boards/sf32lb527/reader_ui.h"
+#include "boards/sf32lb527/standby_clock.h"
 #include "auto_turn.h"
 #endif
 #if !defined(SF32LB57X) && !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
@@ -516,6 +518,7 @@ void handleEpubTableContents(Renderer *renderer, UIAction action, bool needs_red
       reader->load();
       g_last_read_index = epub_list_state.selected_item;
       delete contents;
+      contents = nullptr; // Standby cleanup must not delete the former TOC twice.
       handleEpub(renderer, NONE);
       return;
     }
@@ -799,7 +802,9 @@ void handleUserInteraction(Renderer *renderer, UIAction ui_action, bool needs_re
         return;
     }
     
+#if !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03) || BOARD527_VERBOSE_LOGS
     uint32_t start_tick = rt_tick_get();
+#endif
     switch (ui_state)
     {
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
@@ -929,7 +934,9 @@ void handleUserInteraction(Renderer *renderer, UIAction ui_action, bool needs_re
         handleEpubList(renderer, ui_action, needs_redraw);
         break;
     }
+#if !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03) || BOARD527_VERBOSE_LOGS
     rt_kprintf("Renderer time=%d \r\n", rt_tick_get() - start_tick);
+#endif
 }
 
 // 统一刷屏入口：按历史行为直接同步 flush 当前帧缓冲
@@ -990,6 +997,12 @@ void back_to_main_page()
 
 void draw_welcome_page(Battery *battery)
 {
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+  if(reader527_standby_ram(renderer,false)) {
+    rt_kprintf("CLOCK_ENTRY_FAILED\n");return;
+  }
+  return;
+#endif
   if (ui_state == WELCOME_PAGE) return;
   ui_state = WELCOME_PAGE;
   renderer->fill_rect(0, 0, renderer->get_page_width(), renderer->get_page_height(), 0);
@@ -1073,6 +1086,9 @@ void main_task(void *param)
     rt_kprintf("Font [%d]: %s\n", i, font_manager_get_name(i));
   }
   reading_settings_load(renderer);
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+  bool resume_clock_book=reader527_standby_restore();
+#endif
 
   rt_kprintf("PSRAM free after font init: %d\n", heap_free_size());
 
@@ -1093,6 +1109,12 @@ void main_task(void *param)
 
   ulog_i("main", "Controls configured");
 
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+  if(resume_clock_book) {
+    ui_state=READING_EPUB;
+    if(!reader527_standby_render_saved(renderer)){ui_state=MAIN_PAGE;handleUserInteraction(renderer,NONE,true);}
+  } else
+#endif
   if (button_controls->did_wake_from_deep_sleep())
   {
     bool hydrate_success = renderer->hydrate();
@@ -1138,7 +1160,14 @@ void main_task(void *param)
       screen_get_timeout_shutdown_minutes())
     {
       renderer->set_margin_bottom(0);
-      draw_welcome_page(battery);      
+      draw_welcome_page(battery);
+      // Retained standby returns in this same loop; its old inactivity
+      // timestamp would otherwise enter standby again immediately.
+      last_user_interaction = rt_tick_get_millisecond();
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+      auto_turn_clock.reset();
+      reader527_standby_ram_take_restored();
+#endif
     }
     uint32_t msg_data;
     int wait_ms = 500;
@@ -1158,7 +1187,9 @@ void main_task(void *param)
     if(message_result!=RT_EOK&&!(ui_queue&&ui_queue->entry)&&
        auto_turn_clock.take(rt_tick_get_millisecond(),reading_auto_turn_seconds(),auto_turn_eligible())) {
         msg_data=DOWN;message_result=RT_EOK;
+#if BOARD527_VERBOSE_LOGS
         rt_kprintf("AUTO_TURN_FIRE seconds=%u tick_ms=%u\n",reading_auto_turn_seconds(),rt_tick_get_millisecond());
+#endif
     }
 #endif
     if (message_result == RT_EOK)
@@ -1172,7 +1203,9 @@ void main_task(void *param)
 #endif
       UIAction ui_action = (UIAction)msg_data;
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#if BOARD527_VERBOSE_LOGS
       uint32_t action_begin=rt_tick_get(),action_reads=tf_msd_read_count();
+#endif
       if(ui_action!=DOWN)renderer->cancel_page_preview();
 #endif
     
@@ -1208,8 +1241,10 @@ void main_task(void *param)
           float voltage = battery->get_voltage();
           uint8_t percentage = battery->get_percentage();
           bool is_charging = battery->is_charging();
+#if !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03) || BOARD527_VERBOSE_LOGS
           rt_kprintf("[ADCBattery] Battery Level %f, percent %d, charging %d\n",
                      voltage, (int)percentage, is_charging);
+#endif
 
 #if !defined(SF32LB57X) && !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
           ADCBattery* adc_battery = static_cast<ADCBattery*>(battery);
@@ -1246,6 +1281,12 @@ void main_task(void *param)
             case MSG_DRAW_WELCOME_PAGE:
                 rt_kprintf("power ok , welcome\n");
                 draw_welcome_page(battery);
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+                last_user_interaction = rt_tick_get_millisecond();
+                auto_turn_clock.reset();
+                reader527_standby_ram_take_restored();
+                continue;
+#endif
                 break;
             default:
                 break;
@@ -1253,7 +1294,9 @@ void main_task(void *param)
       }
       else
       {
-        rt_kprintf("no battery msg: %d\n", msg_data);    
+#if !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03) || BOARD527_VERBOSE_LOGS
+        rt_kprintf("no battery msg: %d\n", msg_data);
+#endif
         board->wakeup_filesystem();
         if (ui_action != NONE)
         {
@@ -1269,6 +1312,15 @@ void main_task(void *param)
             touch_controls->renderPressedState(renderer, ui_action);
             AppUIState state_before = ui_state;
             handleUserInteraction(renderer, ui_action, false);
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+            if(reader527_standby_ram_take_restored()) {
+              // The clock handler has already restored and fully refreshed
+              // the previous framebuffer. Avoid a second flush here.
+              last_user_interaction = rt_tick_get_millisecond();
+              board->sleep_filesystem();
+              continue;
+            }
+#endif
 
             // 用户操作后停止预热线程（可能切换了章节/字体）
             epd_font_ft_preheat_stop();
@@ -1356,8 +1408,10 @@ void main_task(void *param)
       request_flush();
 
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#if BOARD527_VERBOSE_LOGS
       rt_kprintf("READER_ACTION action=%u total_ms=%u tf_read_sectors=%u\n",
           (unsigned)ui_action,rt_tick_get()-action_begin,tf_msd_read_count()-action_reads);
+#endif
 #endif
 
     } else {
@@ -1428,6 +1482,9 @@ extern "C"
   {
 #ifdef RT_USING_PM
     rt_pm_request(PM_SLEEP_MODE_IDLE);
+#endif
+#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+    reader527_standby_boot();
 #endif
     ulog_i("main", "epub list state num_epubs=%d", epub_list_state.num_epubs);
     ulog_i("main", "epub list state is_loaded=%d", epub_list_state.is_loaded);

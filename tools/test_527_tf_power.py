@@ -81,6 +81,7 @@ int main(){
 }
 '''
 card=shared+r'''
+#define BOARD527_VERBOSE_LOGS 0
 #define ALIGN(n)
 #define SEND_CID 10
 #define SEND_STATUS 13

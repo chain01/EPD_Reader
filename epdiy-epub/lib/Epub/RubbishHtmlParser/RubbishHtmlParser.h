@@ -81,5 +81,5 @@ public:
   PageAnchor get_page_anchor(int page_index);
 
   // 根据锚点查找新排版中对应的页码，返回 -1 表示未找到
-  int find_page_by_anchor(const PageAnchor &anchor);
+  int find_page_by_anchor(const PageAnchor &anchor, bool exact_line=false);
 };

@@ -75,7 +75,8 @@ public:
   void save_anchor(int &out_block_index, int &out_line_index);
 
   // 字体/排版变更后，根据锚点排到目标页，其余继续后台排版
-  void restore_by_anchor(int block_index, int line_index);
+  void restore_by_anchor(int block_index, int line_index, bool exact_line=false);
+  void resume_background(){preview_attempted=false;start_layout_thread();}
 
   // 覆盖层控制
   void start_overlay() { overlay_active = true; overlay_selected = 0; overlay_jump_acc = 0; overlay_target_page = state.current_page + 1; }
