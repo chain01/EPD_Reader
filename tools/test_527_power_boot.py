@@ -43,6 +43,7 @@ static void HAL_RTC_DeactivateWakeUpTimer(RTC_HandleTypeDef *){}
 static void HAL_PMU_DisableRtcWakeup(){}
 static int tps_init(int){return 0;}
 static int board527_display_init(){return display_error;}
+static void board527_io_init(){}
 static int frontlight_start(){return light_error;}
 static int board527_touch_init(){return touch_error;}
 '''

@@ -25,7 +25,7 @@ void SF32Paper::start_filesystem()
     if(board527_storage_mount())rt_kprintf("BOARD527 TF unavailable; insert a formatted card and run tf init\n");
 }
 void SF32Paper::stop_filesystem() {}
-void SF32Paper::sleep_filesystem() {} /* No verified TF power gate. */
+void SF32Paper::sleep_filesystem() { (void)board527_storage_idle(0); }
 void SF32Paper::wakeup_filesystem() {}
 void SF32Paper::prepare_to_sleep()
 {

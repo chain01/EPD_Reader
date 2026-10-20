@@ -50,6 +50,7 @@ jobs:
         python3 tools/test_527_power_steps.py
         python3 tools/test_527_power_boot.py
         python3 tools/test_527_touch_power.py
+        python3 tools/test_527_tf_power.py
         python3 tools/test_527_dfu.py
         python3 tools/test_527_dfu_package.py
         

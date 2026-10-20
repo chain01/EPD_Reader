@@ -71,11 +71,12 @@ static rt_size_t read_device(rt_device_t dev,rt_off_t pos,void *buf,rt_size_t n)
 static rt_err_t control(rt_device_t dev,int command,void *arg)
 {
     (void)dev;(void)arg;int rc=0;
+    if(board527_io_enter())return -RT_EIO;
     rt_mutex_take(&lock,RT_WAITING_FOREVER);
     if(command==RTGRAPHIC_CTRL_POWERON)rc=ready?0:reset();
     else if(command==RTGRAPHIC_CTRL_POWEROFF)disable();
     else rc=-RT_ENOSYS;
-    rt_mutex_release(&lock);return rc;
+    rt_mutex_release(&lock);board527_io_exit();return rc;
 }
 static void irq(void *arg)
 {
@@ -87,6 +88,7 @@ static void worker(void *arg)
     while(1) {
         /* Poll only during an active gesture to recover a missed release. */
         int wake=rt_sem_take(&sem,tracker.active?rt_tick_from_millisecond(20):RT_WAITING_FOREVER);
+        if(board527_io_enter()){++errors;continue;}
         rt_mutex_take(&lock,RT_WAITING_FOREVER);
         if(ready && (aw_gen!=board_expander_generation()||!rt_pin_read(3)))disable();
         if(ready && (wake==RT_EOK||tracker.active)) {
@@ -101,19 +103,20 @@ static void worker(void *arg)
             if(!rc){seen=1;++frames;consecutive=0;ft5446_track(&tracker,&frame,emit,RT_NULL);}
             else if(rc<0&&++consecutive==5)ft5446_cancel(&tracker,emit,RT_NULL);
         }
-        rt_mutex_release(&lock);
+        rt_mutex_release(&lock);board527_io_exit();
     }
 }
 static int tp(int argc,char **argv)
 {
     if(argc==2 && !strcmp(argv[1],"regs")) {
+        if(board527_io_enter())return -RT_EIO;
         const uint8_t regs[]={0x00,0x86,0x87,0x88,0x89,0xa3,0xa4,0xa5,0xa6};
         rt_mutex_take(&lock,RT_WAITING_FOREVER);
         if(ready)for(unsigned i=0;i<sizeof(regs);++i) {
             uint8_t value=0;int rc=read_regs(regs[i],&value,1);
             rt_kprintf("TP_REG %02x=%02x rc=%d\n",regs[i],value,rc);
         }
-        rt_mutex_release(&lock);
+        rt_mutex_release(&lock);board527_io_exit();
     }
     rt_kprintf("TP_STATUS ready=%u irq=%u frames=%u io_errors=%u bad_reports=%u active=%04x\n",ready,irqs,frames,errors,bad,tracker.active);
     return 0;
@@ -148,6 +151,7 @@ int board527_touch_test_sleep(int sleeping)
 {
     int rc=-RT_ENOSYS;
     if(!initialized)return rc;
+    if(board527_io_enter())return -RT_EIO;
     rt_mutex_take(&lock,RT_WAITING_FOREVER);
     if(!sleeping)rc=reset();
     else if(ready) {
@@ -157,7 +161,7 @@ int board527_touch_test_sleep(int sleeping)
         rc=rt_i2c_mem_write(bus,0x38,0xa5,8,&mode,1)==1?0:-RT_ERROR;
         if(rc)reset();
     }
-    rt_mutex_release(&lock);
+    rt_mutex_release(&lock);board527_io_exit();
     rt_kprintf("TP_TEST_SLEEP requested=%d rc=%d ready=%u\n",sleeping,rc,ready);
     return rc;
 }
@@ -169,6 +173,7 @@ int board527_touch_quiet_mode(unsigned mode)
 {
     if(mode>2)return -RT_EINVAL;
     if(!initialized)return -RT_ENOSYS;
+    if(board527_io_enter())return -RT_EIO;
     int rc=0;uint8_t id=0,fw=0,work=0,gmode=1,auto_mode=0,pmode=0;
     rt_mutex_take(&lock,RT_WAITING_FOREVER);
     disable();
@@ -197,7 +202,7 @@ int board527_touch_quiet_mode(unsigned mode)
     }
 quiet_done:
     if(rc)board_touch_reset(0);
-    rt_mutex_release(&lock);
+    rt_mutex_release(&lock);board527_io_exit();
     rt_kprintf("TP_QUIET mode=%u PA32=1 id=%02x fw=%02x auto=%02x pm_before=%02x irq_enabled=0 rc=%d\n",
         mode,id,fw,auto_mode,pmode,rc);
     return rc;

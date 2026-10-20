@@ -131,6 +131,8 @@ struct msd_device
 
 extern rt_err_t msd_init(const char *sd_device_name, const char *spi_device_name);
 rt_err_t msd_reinit(void);
+int tf_msd_prepare_off(void);
+void tf_msd_power_lost(void);
 void tf_msd_write_enable(int on);
 void tf_msd_status(void);
 

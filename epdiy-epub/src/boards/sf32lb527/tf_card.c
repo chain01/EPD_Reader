@@ -18,6 +18,7 @@
 #include "spi_msd.h"
 #include "epd_tps.h"
 #include "tf_card.h"
+#include "board527.h"
 
 static struct rt_mutex lock;
 static unsigned started,mounted,ready,failures;
@@ -84,7 +85,9 @@ static int initialize(void)
     }
     tf_msd_write_enable(1);
     card=rt_device_find("sd0");
+    if(board527_io_enter())return -RT_EIO;
     int rc=card?msd_reinit():msd_init("sd0","tfspi");
+    board527_io_exit();
     if(rc){ready=0;rt_kprintf("TF_INIT_FAIL rc=%d\n",rc);return -1;}
     card=rt_device_find("sd0");
     if(!card || rt_device_control(card,RT_DEVICE_CTRL_BLK_GETGEOME,&geometry)!=RT_EOK || geometry.bytes_per_sector!=512 || geometry.sector_count<4096)return -1;
@@ -215,6 +218,51 @@ static int file_hash(const char *path)
     rt_kprintf("TF_FILE_READ rc=%d bytes=%u hash=%08x ms=%u capped_at_8MiB=%u\n",rc,total,hash,(unsigned)(rt_tick_get()-begin),total==8u*1024*1024);
     return rc;
 }
+/* Keep the same writable descriptor across real VDD cycles; verify offsets,
+ * readback without unmounting the reader's live font/book descriptors. */
+static int power_test(void)
+{
+    if(!mounted||board_tf_present()!=1)return -1;
+    uint32_t before=0,after=0;unsigned nb=0,na=0;
+    struct statfs fb,fa;
+    if(list_root(0,&before,&nb)||statfs("/",&fb)||(uint64_t)fb.f_bfree*fb.f_bsize<1048576)return -1;
+    uint32_t seed=rt_tick_get()^0x52737000u;char path[32];int fd=-1,created=0,rc=-1;
+    board527_storage_pm_enable(1);
+    for(unsigned n=0;n<16;++n) {
+        rt_snprintf(path,sizeof(path),"/TP%06X.BIN",(seed+n)&0xffffff);
+        fd=open(path,O_RDWR|O_CREAT|O_EXCL,0);
+        if(fd>=0){created=1;break;}if(errno!=EEXIST)return -1;
+    }
+    if(!created)return -1;
+    for(unsigned cycle=0;cycle<16;++cycle) {
+        unsigned bytes=(cycle+1)*sizeof(block);
+        for(unsigned i=0;i<sizeof(block);++i)block[i]=pattern(cycle*sizeof(block)+i,seed);
+        if(write(fd,block,sizeof(block))!=sizeof(block)||fsync(fd))goto pm_cleanup;
+        int sleep_rc=-RT_EBUSY;
+        for(unsigned tries=0;tries<60&&sleep_rc==-RT_EBUSY;++tries) {
+            sleep_rc=board527_storage_idle(1);
+            if(sleep_rc==-RT_EBUSY)rt_thread_mdelay(100);
+        }
+        if(sleep_rc)goto pm_cleanup;
+        rt_thread_mdelay(40);
+        if(lseek(fd,0,SEEK_SET)!=0)goto pm_cleanup;
+        for(unsigned offset=0;offset<bytes;offset+=sizeof(compare)) {
+            if(read(fd,compare,sizeof(compare))!=sizeof(compare))goto pm_cleanup;
+            for(unsigned i=0;i<sizeof(compare);++i)if(compare[i]!=pattern(offset+i,seed))goto pm_cleanup;
+        }
+        rt_kprintf("TF_PM_FILE_CYCLE cycle=%u bytes=%u PASS\n",cycle+1,bytes);
+    }
+    if(close(fd)){fd=-1;goto pm_cleanup;}fd=-1;
+    if(verify_file(path,16*sizeof(block),seed))goto pm_cleanup;
+    rc=0;
+pm_cleanup:
+    if(fd>=0&&close(fd))rc=-1;
+    if(!rc&&unlink(path))rc=-1;
+    if(rc)rt_kprintf("TF_PM_TEST_FILE_RETAINED %s\n",path);
+    if(!rc&&(list_root(0,&after,&na)||statfs("/",&fa)||before!=after||nb!=na||fb.f_bfree!=fa.f_bfree))rc=-1;
+    rt_kprintf("TF_PM_FILE_TEST rc=%d cycles=16 retained_fd=1 directory_preserved=%d\n",rc,!rc);
+    return rc;
+}
 static int tf(int argc,char **argv)
 {
     if(!started)return -RT_ENOSYS;
@@ -225,12 +273,13 @@ static int tf(int argc,char **argv)
         else if(!strcmp(argv[1],"ls"))rc=mounted?list_root(1,RT_NULL,RT_NULL):-1;
         else if(!strcmp(argv[1],"readtest"))rc=read_test();
         else if(!strcmp(argv[1],"writetest"))rc=write_test();
+        else if(!strcmp(argv[1],"pmtest"))rc=power_test();
         else if(!strcmp(argv[1],"unmount"))rc=unmount_card();
     } else if(argc==3&&!strcmp(argv[1],"read"))rc=file_hash(argv[2]);
     if(rc) {
         ++failures;
         rt_kprintf("TF_COMMAND_FAIL rc=%d errno=%d\n",rc,errno);
-        if(rc==-RT_EINVAL)rt_kprintf("tf status | init | ls | readtest | writetest | unmount | read <path>\n");
+        if(rc==-RT_EINVAL)rt_kprintf("tf status | init | ls | readtest | writetest | pmtest | unmount | read <path>\n");
     }
     rt_mutex_release(&lock);return rc;
 }
@@ -241,6 +290,7 @@ static void startup(void *arg)
     int rc=initialize();if(rc)++failures;
     status();rt_kprintf("TF_BOOT rc=%d; use tf init after inserting a card\n",rc);
     rt_mutex_release(&lock);
+    if(!rc)board527_storage_pm_enable(1);
 }
 int tf_card_start(void)
 {
@@ -269,13 +319,15 @@ void tf_card_display_unlock(void)
 int board527_storage_mount(void)
 {
     if(!started){rt_mutex_init(&lock,"tflock",RT_IPC_FLAG_PRIO);started=1;}
-    rt_mutex_take(&lock,RT_WAITING_FOREVER);int rc=initialize();rt_mutex_release(&lock);return rc;
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);int rc=initialize();rt_mutex_release(&lock);
+    if(!rc)board527_storage_pm_enable(1);return rc;
 }
 
 int board527_storage_test_begin(void)
 {
+    board527_storage_pm_enable(0);
     if(!started)return -RT_ENOSYS;
-    tf_card_display_lock();
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);
     dfs_lock();
     struct dfs_filesystem *fs=dfs_filesystem_lookup("/");
     struct dfs_fdtable *table=dfs_fdtable_get();
@@ -285,8 +337,11 @@ int board527_storage_test_begin(void)
         if(fs&&fd&&fd->ref_count>0&&fd->fs==fs){busy=1;break;}
     }
     if(busy||unmount_card()) {
-        dfs_unlock();tf_card_display_unlock();return -RT_EBUSY;
+        dfs_unlock();rt_mutex_release(&lock);return -RT_EBUSY;
     }
+    if(board527_io_diagnostic_begin()){dfs_unlock();rt_mutex_release(&lock);return -RT_EIO;}
+    struct rt_spi_device *spi=(struct rt_spi_device *)rt_device_find("tfspi");
+    if(spi)rt_mutex_take(&spi->bus->lock,RT_WAITING_FOREVER);
     ready=0;
     /* UI owns the locks until remount; diagnostics/background opens cannot
      * touch the unpowered card. No user data is written or formatted. */
@@ -295,6 +350,8 @@ int board527_storage_test_begin(void)
 int board527_storage_test_end(void)
 {
     int rc=initialize();
-    dfs_unlock();tf_card_display_unlock();
-    return rc;
+    struct rt_spi_device *spi=(struct rt_spi_device *)rt_device_find("tfspi");
+    if(spi)rt_mutex_release(&spi->bus->lock);
+    board527_io_diagnostic_end();dfs_unlock();rt_mutex_release(&lock);
+    if(!rc)board527_storage_pm_enable(1);return rc;
 }

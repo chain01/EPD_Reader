@@ -8,6 +8,7 @@
 #include <finsh.h>
 #include "board.h"
 #include "epd_tps.h" /* Existing panel API names retained. */
+#include "board527.h"
 
 static struct rt_i2c_bus_device *aw_bus,*sy_bus;
 static int configured,powered,aw_ready;
@@ -19,21 +20,33 @@ static unsigned aw_generation;
 static rt_tick_t power_off_tick;
 static int discharge_pending;
 
-static int reg_read(struct rt_i2c_bus_device *bus,unsigned addr,uint8_t reg,uint8_t *value)
+static int raw_read(struct rt_i2c_bus_device *bus,unsigned addr,uint8_t reg,uint8_t *value)
 {
     struct rt_i2c_msg m[2]={{.addr=addr,.flags=RT_I2C_WR,.buf=&reg,.len=1},
                           {.addr=addr,.flags=RT_I2C_RD,.buf=value,.len=1}};
     return bus && rt_i2c_transfer(bus,m,2)==2?0:-1;
 }
-static int reg_write(struct rt_i2c_bus_device *bus,unsigned addr,uint8_t reg,uint8_t value)
+static int reg_read(struct rt_i2c_bus_device *bus,unsigned addr,uint8_t reg,uint8_t *value)
+{
+    if(addr!=0x62)return raw_read(bus,addr,reg,value);
+    if(board527_io_enter())return -1;
+    int rc=raw_read(bus,addr,reg,value);board527_io_exit();return rc;
+}
+static int raw_write(struct rt_i2c_bus_device *bus,unsigned addr,uint8_t reg,uint8_t value)
 {
     uint8_t data[2]={reg,value},readback=0;
     struct rt_i2c_msg m={.addr=addr,.flags=RT_I2C_WR,.buf=data,.len=2};
-    if(!bus || rt_i2c_transfer(bus,&m,1)!=1 || reg_read(bus,addr,reg,&readback) || readback!=value) {
+    if(!bus || rt_i2c_transfer(bus,&m,1)!=1 || raw_read(bus,addr,reg,&readback) || readback!=value) {
         rt_kprintf("PMIC_WRITE_FAIL addr=%02x reg=%02x want=%02x got=%02x\n",addr,reg,value,readback);
         return -1;
     }
     return 0;
+}
+static int reg_write(struct rt_i2c_bus_device *bus,unsigned addr,uint8_t reg,uint8_t value)
+{
+    if(addr!=0x62)return raw_write(bus,addr,reg,value);
+    if(board527_io_enter())return -1;
+    int rc=raw_write(bus,addr,reg,value);board527_io_exit();return rc;
 }
 static struct rt_i2c_bus_device *open_bus(const char *name)
 {
@@ -54,6 +67,19 @@ static int ge(unsigned pin,int value)
     return rc;
 }
 int board_touch_reset(int high) { return ge(13,high!=0); }
+int board527_logic_sleep_ready(void)
+{
+    return !powered&&!configured&&
+        (!discharge_pending||(rt_tick_t)(rt_tick_get()-power_off_tick)>=rt_tick_from_millisecond(450));
+}
+int board527_logic_power(int on)
+{
+    if(!on&&!board527_logic_sleep_ready())return -RT_EBUSY;
+    uint8_t in=0;int rc=ge(14,on!=0);
+    if(!rc)rc=reg_read(aw_bus,0x59,1,&in);
+    if(!rc&&((in>>6)&1)!=(on!=0))rc=-RT_EIO;
+    return rc;
+}
 int board_tf_present(void)
 {
     uint8_t value=0;

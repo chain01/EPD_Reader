@@ -15,6 +15,9 @@ stubs=r'''
 #define RT_ERROR 1
 #define RT_EBUSY 16
 #define RT_EOK 0
+#define RT_EIO 5
+static int board527_io_enter(){return 0;}
+static void board527_io_exit(){}
 #define RT_WAITING_FOREVER -1
 #define RT_IPC_CMD_RESET 0
 #define RT_NULL nullptr

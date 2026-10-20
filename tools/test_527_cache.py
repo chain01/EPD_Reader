@@ -65,6 +65,10 @@ header+=driver[driver.index('static int preparation_cancelled'):driver.index('L1
 present_stubs=r'''
 #define RT_WAITING_FOREVER -1
 #define RT_ENOMEM 5
+#define RT_EIO 6
+static int io_failure,io_votes;
+static int board527_io_enter(void){if(io_failure)return -1;++io_votes;return 0;}
+static void board527_io_exit(void){assert(io_votes>0);--io_votes;}
 typedef unsigned WAVE_TABLE_MODE_T;
 static unsigned loaded_count,temperature=28,ticks;
 static unsigned waveform_bin_reader_get_frames(unsigned t,unsigned m){(void)t;(void)m;return loaded_count;}
@@ -105,6 +109,7 @@ int main(int argc,char **argv)
     }
     puts("PAIR_LUT_EXHAUSTIVE_AND_CODEC_FUZZ_PASS");
     memset(mixed,255,sizeof(mixed));memset(requested,255,sizeof(requested));
+    io_failure=1;assert(board527_display_present(requested)==-RT_EIO&&lock==0&&drive_calls==0&&io_votes==0);io_failure=0;
     previous_known=1;refresh_index=1;requested[0]=0xf7;drive_result=-RT_ENOMEM;
     assert(board527_display_present(requested)==-RT_ENOMEM);
     assert(previous_known&&refresh_index==1&&lock==0&&drive_calls==1&&drive_mode==5);

@@ -16,7 +16,15 @@
 #include <string.h>
 #include "spi_msd.h"
 #include "epd_tps.h"
+#include "board527.h"
 static unsigned write_allowed,read_sectors,write_sectors,io_errors,blocked_writes;
+static unsigned pm_restoring,pm_cold,pm_identity_valid,pm_fault,pm_resumes;
+static uint8_t pm_cid[16];
+static struct rt_device_blk_geometry pm_geometry;
+static msd_card_type pm_card_type;
+static long pm_offset;
+static int pm_resume(void);
+static int pm_identify(int remember);
 uint32_t tf_msd_read_count(void){return read_sectors;}
 void tf_msd_write_enable(int on){write_allowed=on!=0;}
 
@@ -28,7 +36,7 @@ void tf_msd_write_enable(int on){write_allowed=on!=0;}
 //#define MSD_TRACE
 
 #if 1//def MSD_TRACE
-    #define MSD_DEBUG(...)         rt_kprintf("[MSD] %d ", rt_tick_get()); rt_kprintf(__VA_ARGS__);
+    #define MSD_DEBUG(...) do { if(!pm_restoring) { rt_kprintf("[MSD] %d ", rt_tick_get()); rt_kprintf(__VA_ARGS__); } } while(0)
 #else
     #define MSD_DEBUG(...)
 #endif /* #ifdef MSD_TRACE */
@@ -1332,7 +1340,7 @@ static rt_err_t rt_msd_close(rt_device_t dev)
     return RT_EOK;
 }
 
-static rt_size_t sector_io(rt_device_t dev,rt_off_t pos,void *buffer,rt_size_t count,int writing)
+static rt_size_t sector_io_locked(rt_device_t dev,rt_off_t pos,void *buffer,rt_size_t count,int writing)
 {
     struct msd_device *msd=(struct msd_device *)dev;
     if(!count)return 0;
@@ -1363,6 +1371,15 @@ static rt_size_t sector_io(rt_device_t dev,rt_off_t pos,void *buffer,rt_size_t c
     rt_mutex_release(&msd->spi_device->bus->lock);
     if(writing)write_sectors+=done;else read_sectors+=done;
     return done;
+}
+static rt_size_t sector_io(rt_device_t dev,rt_off_t pos,void *buffer,rt_size_t count,int writing)
+{
+    if(!count)return 0;
+    if(board527_io_enter()){++io_errors;return 0;}
+    rt_size_t done=0;
+    if(!pm_resume())done=sector_io_locked(dev,pos,buffer,count,writing);
+    else ++io_errors;
+    board527_io_exit();return done;
 }
 static rt_size_t rt_msd_read(rt_device_t dev,rt_off_t pos,void *buf,rt_size_t n){return sector_io(dev,pos,buf,n,0);}
 static rt_size_t rt_msd_sdhc_read(rt_device_t dev,rt_off_t pos,void *buf,rt_size_t n){return sector_io(dev,pos,buf,n,0);}
@@ -1446,7 +1463,16 @@ static rt_err_t rt_msd_control(rt_device_t dev, int cmd, void *args)
         geometry->sector_count = msd->geometry.sector_count;
         break;
     case RT_DEVICE_CTRL_GET_INT:
-        result = rt_msd_detection(dev);
+        if(board527_io_enter())return -RT_EIO;
+        result=pm_resume();
+        if(!result)result=rt_msd_detection(dev);
+        board527_io_exit();
+        break;
+    case RT_DEVICE_CTRL_BLK_SYNC:
+        if(board527_io_enter())return -RT_EIO;
+        result=pm_resume();
+        if(!result)result=tf_msd_prepare_off();
+        board527_io_exit();
         break;
     }
 
@@ -1550,6 +1576,7 @@ rt_err_t msd_init(const char *sd_device_name, const char *spi_device_name)
         MSD_DEBUG("[SD] init failed\n");
         return RT_ERROR;
     }
+    if(pm_identify(1))return -RT_EIO;
     result = rt_device_register(&_msd_device.parent, sd_device_name,
                                 RT_DEVICE_FLAG_RDWR | RT_DEVICE_FLAG_REMOVABLE | RT_DEVICE_FLAG_STANDALONE);
 
@@ -1558,17 +1585,78 @@ rt_err_t msd_init(const char *sd_device_name, const char *spi_device_name)
 
 rt_err_t msd_reinit(void)
 {
+    if(pm_fault)return -RT_EIO;
     if (RT_EOK != rt_msd_init((rt_device_t)&_msd_device))
     {
         MSD_DEBUG("[SD] reinit failed\n");
+        if(pm_identity_valid)pm_fault=1;
         return RT_ERROR;
     }
-    return RT_EOK;
+    int rc=pm_identify(!pm_identity_valid);
+    if(rc&&pm_identity_valid)pm_fault=1;
+    return rc;
 }
+
+/* Check immutable identity before allowing a retained filesystem to address
+ * freshly powered media. A mismatch/error stays blocked until a reboot. */
+static int pm_identify(int remember)
+{
+    struct msd_device *m=&_msd_device;
+    ALIGN(32) uint8_t cid[16];uint8_t response[5]={0};
+    if(pm_fault)return -RT_EIO;
+    int rc=MSD_take_owner(m->spi_device);
+    if(rc)return rc;
+    rt_spi_take(m->spi_device);
+    rc=_send_cmd(m->spi_device,SEND_CID,0,0,response_r1,response);
+    if(!rc&&response[0])rc=-RT_EIO;
+    if(!rc)rc=_read_block(m->spi_device,cid,sizeof(cid));
+    rt_spi_release(m->spi_device);rt_mutex_release(&m->spi_device->bus->lock);
+    if(rc)return rc;
+    if(remember) {
+        memcpy(pm_cid,cid,16);pm_geometry=m->geometry;pm_card_type=m->card_type;
+        pm_offset=m->offset;pm_identity_valid=1;
+    } else if(memcmp(pm_cid,cid,16)||pm_geometry.sector_count!=m->geometry.sector_count||
+              pm_geometry.bytes_per_sector!=m->geometry.bytes_per_sector||pm_geometry.block_size!=m->geometry.block_size||
+              pm_card_type!=m->card_type||pm_offset!=m->offset) {
+        pm_fault=1;rt_kprintf("TF_PM_MEDIA_CHANGED blocked_until_reboot=1\n");return -RT_EIO;
+    }
+    pm_cold=0;return 0;
+}
+static int pm_resume(void)
+{
+    if(pm_fault)return -RT_EIO;
+    if(!pm_cold)return 0;
+    if(!pm_identity_valid||board_tf_present()!=1){pm_fault=1;return -RT_EIO;}
+    uint32_t begin=rt_tick_get();pm_restoring=1;
+    int rc=rt_msd_init((rt_device_t)&_msd_device);
+    if(!rc)rc=pm_identify(0);
+    pm_restoring=0;
+    if(rc)pm_fault=1;else ++pm_resumes;
+    rt_kprintf("TF_PM_REINIT rc=%d ms=%u count=%u identity_ok=%u\n",rc,rt_tick_get()-begin,pm_resumes,!rc);
+    return rc;
+}
+int tf_msd_prepare_off(void)
+{
+    struct msd_device *m=&_msd_device;
+    if(!pm_identity_valid||pm_fault||!m->spi_device)return -RT_EBUSY;
+    if(pm_cold)return 0; // Rail was restored for touch/display, card unused.
+    if(board_tf_present()!=1)return -RT_EIO;
+    int rc=MSD_take_owner(m->spi_device);
+    if(rc)return rc;
+    rt_spi_take(m->spi_device);
+    rc=_wait_ready(m->spi_device);
+    uint8_t response[5]={0};
+    if(!rc)rc=_send_cmd(m->spi_device,SEND_STATUS,0,0,response_r2,response);
+    if(!rc&&(response[0]||response[1]))rc=-RT_EIO;
+    rt_spi_release(m->spi_device);rt_mutex_release(&m->spi_device->bus->lock);
+    return rc;
+}
+void tf_msd_power_lost(void){pm_cold=1;}
 
 
 void tf_msd_status(void)
 {
+    rt_kprintf("TF_PM_CARD cold=%u identity=%u fault=%u resumes=%u\n",pm_cold,pm_identity_valid,pm_fault,pm_resumes);
     rt_kprintf("TF_BLOCK read_sectors=%u write_sectors=%u io_errors=%u blocked_writes=%u write_enabled=%u\n",
         read_sectors,write_sectors,io_errors,blocked_writes,write_allowed);
     rt_kprintf("TF_SPI requested_hz=%u card_type=%u single_block=1 crc16_read=1\n",

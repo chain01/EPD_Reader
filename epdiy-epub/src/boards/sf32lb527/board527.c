@@ -9,6 +9,7 @@ int board527_init(void)
     static int initialized;
     if(initialized)return 0;
     if(tps_init(1100)||board527_display_init())return -1;
+    board527_io_init();
     int light=frontlight_start(),touch=board527_touch_init();
     int power=board527_power_init(); // Diagnostics need timers even without touch.
     if (touch || power) {

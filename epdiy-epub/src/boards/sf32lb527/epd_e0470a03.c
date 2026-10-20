@@ -618,11 +618,13 @@ cleanup:
 }
 static void lock_devices(void)
 {
-    tf_card_display_lock();frontlight_display_lock();board527_touch_lock();
+    /* Shared IO lock already excludes TF transfers; never wait for a
+     * filesystem command lock while holding that lower-level lock. */
+    frontlight_display_lock();board527_touch_lock();
 }
 static void unlock_devices(void)
 {
-    board527_touch_unlock();frontlight_display_unlock();tf_card_display_unlock();
+    board527_touch_unlock();frontlight_display_unlock();
 }
 static unsigned refresh_mode(unsigned period,unsigned index,int has_gray,int old_gray)
 {
@@ -672,7 +674,9 @@ int board527_display_prepare(const uint8_t *gray4,int (*cancel)(void *),void *co
 int board527_display_present(const uint8_t *gray4)
 {
     if(!ready||!gray4)return -1;
-    rt_mutex_take(&lock,RT_WAITING_FOREVER);lock_devices();
+    rt_mutex_take(&lock,RT_WAITING_FOREVER);
+    if(board527_io_enter()){rt_mutex_release(&lock);return -RT_EIO;}
+    lock_devices();
     int rc=0,has_gray=0,old_gray=0,changed=0;
     if(prepared) {
         int match=previous_known&&prepared_index==refresh_index;
@@ -707,7 +711,7 @@ int board527_display_present(const uint8_t *gray4)
         for(unsigned i=0;i<W*H;++i)mixed[i]>>=4;
     }
 finish:
-    unlock_devices();rt_mutex_release(&lock);return rc;
+    unlock_devices();board527_io_exit();rt_mutex_release(&lock);return rc;
 }
 int board527_display_init(void)
 {
