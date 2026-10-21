@@ -1,0 +1,9 @@
+import os
+from building import *
+Import('SIFLI_SDK')
+cwd=GetCurrentDir()
+group=DefineGroup('Reader527Recovery',Glob('*.c'),depend=[''],
+                  CPPPATH=[cwd,os.path.join(cwd,'../common')])
+objs=group+SConscript(os.path.join(cwd,'../common/SConscript'),variant_dir='core',duplicate=0)
+objs+=SConscript(os.path.join(SIFLI_SDK,'SConscript'),variant_dir='sifli_sdk',duplicate=0)
+Return('objs')
