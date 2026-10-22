@@ -63,7 +63,7 @@ Before first installation, read and verify the complete 16MiB NOR, not only the 
 
 The new board automatically enters retained deep sleep while waiting for input after background work finishes. Touch IRQ PA44 is configured as AON PIN20; touch and frontlight supply rails remain stable. The CPU and memory sleep/resume path has been exercised on hardware; physical touch-wake acceptance and whole-board current measurements remain pending. Battery/charger routing and physical keys have not been validated. The BSP does not reuse old-board ADC/key assignments. Bluetooth/PAN and weather code are retained but require separate end-to-end validation with a phone/network.
 
-The recovery boot path now uses the original firmware's PA34 active-high power-key definition; it does not enable the reader's general button/ADC driver. USB recovery is also available from Settings, and is selected automatically after interrupted updates or failed image checks.
+The recovery boot path uses PA33 as an active-low GPIO input with pull-up and a 1.5-second hold, independently of the PA34 hardware reset/power key. Boot does not enable the application ADC button driver. Existing devices need a separately verified first-stage boot update over debug UART for this change to take effect; normal USB application updates cannot replace the protected bootloader. USB recovery is also available from Settings, and is selected automatically after interrupted updates or failed image checks.
 
 ## Validation status
 
