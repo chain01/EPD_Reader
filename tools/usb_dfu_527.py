@@ -18,9 +18,9 @@ MAGIC=0x55373235
 NAMES=('ER_IROM1.bin','ER_IROM2.bin','epd_waveform.bin')
 LIMITS=(0x200000,0xa00000,0x40000)
 
-def load_package(path):
+def load_package(path,board=BOARD):
     meta=json.loads((path/'update.json').read_text(encoding='utf-8'))
-    if meta.get('board')!=BOARD or meta.get('layout')!=1 or meta.get('protocol')!=1:
+    if meta.get('board')!=board or meta.get('layout')!=1 or meta.get('protocol')!=1:
         raise ValueError('Wrong board, layout or protocol')
     records=meta['images']
     if len(records)!=3:raise ValueError('An update requires exactly three images')
@@ -36,7 +36,7 @@ def load_package(path):
     sp,pc=struct.unpack_from('<II',images[0])
     if sp%8 or not 0x20000000<=sp<=0x2007fc00 or not pc&1 or not 0x12200000<=pc<0x12200000+len(images[0]):
         raise ValueError('Invalid application vectors')
-    manifest=struct.pack('<III',BOARD,1,3)+b''.join(struct.pack('<II',len(data),zlib.crc32(data)) for data in images)
+    manifest=struct.pack('<III',board,1,3)+b''.join(struct.pack('<II',len(data),zlib.crc32(data)) for data in images)
     return images,manifest
 
 def encode(command,sequence,payload=b''):
@@ -45,8 +45,9 @@ def encode(command,sequence,payload=b''):
     return header+struct.pack('<I',crc)+payload
 
 class Recovery:
-    def __init__(self,port):
+    def __init__(self,port,board=BOARD):
         import serial
+        self.board=board
         self.serial=serial.Serial(port=None,baudrate=1000000,timeout=.2,write_timeout=10)
         self.serial.rts=False;self.serial.dtr=False;self.serial.port=port;self.serial.open()
         self.serial.reset_input_buffer();self.serial.dtr=True
@@ -69,12 +70,12 @@ class Recovery:
         body=self.exact(size,deadline)
         if zlib.crc32(body,zlib.crc32(header[:16]))!=crc:raise ValueError('Corrupt recovery reply')
         status,value,board=struct.unpack('<iII',body)
-        if board!=BOARD:raise ValueError('Wrong device board ID')
+        if board!=self.board:raise ValueError('Wrong device board ID')
         if status:raise RuntimeError(f'Recovery rejected command {command}: {status}; device remains in DFU')
         return value
     def close(self):self.serial.close()
 
-def main():
+def main(board=BOARD,serial_number='EPD527-RECOVERY-1'):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--package',type=Path)
     parser.add_argument('--port',help='Native USB CDC port, auto-detected when omitted')
@@ -82,14 +83,14 @@ def main():
     parser.add_argument('--reboot',action='store_true',help='Boot only if all installed image checksums pass')
     args=parser.parse_args()
     if not args.info and not args.reboot and args.package is None:parser.error('--package, --info or --reboot is required')
-    images,manifest=load_package(args.package) if args.package else (None,None)
+    images,manifest=load_package(args.package,board) if args.package else (None,None)
     from serial.tools import list_ports
     port=args.port
     if not port:
-        candidates=[p.device for p in list_ports.comports() if p.vid==0x38f4 and p.pid==1 and p.serial_number=='EPD527-RECOVERY-1']
+        candidates=[p.device for p in list_ports.comports() if p.vid==0x38f4 and p.pid==1 and p.serial_number==serial_number]
         if len(candidates)!=1:parser.error('Connect exactly one recovery device, or specify --port')
         port=candidates[0]
-    device=Recovery(port)
+    device=Recovery(port,board)
     try:
         print(f'Recovery on {port}, state=0x{device.command(1):08x}',flush=True)
         if images:

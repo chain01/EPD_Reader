@@ -14,7 +14,7 @@ extern "C" {
 extern RTC_HandleTypeDef RTC_Handler;
 extern const EpdFont regular_font;
 }
-extern void reader527_close_book_for_power_test();
+extern void reader_close_book();
 static bool resume_requested;
 static volatile bool key_seen;
 static struct rt_semaphore ram_event;
@@ -158,7 +158,7 @@ int reader527_standby_enter(Renderer *r,bool test)
     epd_font_ft_preheat_stop();
     if(reader527_standby_save())return -RT_EIO;
     watch_key();
-    reader527_close_book_for_power_test();r->cancel_page_preview();board527_storage_pm_enable(0);
+    reader_close_book();r->cancel_page_preview();board527_storage_pm_enable(0);
     if(font_manager_select(0,28))return abort_clock("builtin_font");
     if(board527_frontlight_set(0,0)||board527_amplifier_test(1))return abort_clock("peripheral_shutdown");
     board527_touch_power(0);
@@ -171,7 +171,7 @@ int reader527_standby_enter(Renderer *r,bool test)
 }
 void reader527_standby_preview(Renderer *r)
 {
-    reader527_close_book_for_power_test();r->cancel_page_preview();
+    reader_close_book();r->cancel_page_preview();
     unsigned minute,second;
     if(!read_clock(minute,second)||font_manager_select(0,28))return;
     draw_clock(r,minute);int rc=board527_clock_present(board527_framebuffer(),1);

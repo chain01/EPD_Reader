@@ -37,7 +37,7 @@ private:
   int overlay_target_page = 1;
   // 覆盖层中心属性模式：触控开关 或 全刷周期
   enum OverlayCenterMode { CENTER_TOUCH = 0, CENTER_FULL_REFRESH = 1 };
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#ifdef READER_E0470A03
   OverlayCenterMode overlay_center_mode = CENTER_FULL_REFRESH;
 #else
   OverlayCenterMode overlay_center_mode = CENTER_TOUCH;
@@ -94,7 +94,7 @@ public:
   int overlay_get_target_page() const { return overlay_target_page; }
   // 覆盖层中心属性控制
   void overlay_set_center_mode_touch() {
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#ifdef READER_E0470A03
     // This board has no verified physical controls to re-enable touch.
     overlay_center_mode = CENTER_FULL_REFRESH;
 #else

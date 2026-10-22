@@ -1,0 +1,9 @@
+from building import *
+import os
+cwd=GetCurrentDir()
+base=os.path.join(os.environ['SIFLI_SDK'],'customer/boards/sf32lb57-dpi-hdk_base')
+src=Glob('*.c')
+if not GetDepend('BSP_USING_LCD'):
+    SrcRemove(src,'bsp_lcd_tp.c')
+group=DefineGroup('Reader57Board',src,depend=[],CPPPATH=[cwd,base,os.path.join(base,'../include')])
+Return('group')

@@ -4,11 +4,11 @@
 #include "type.h"
 
 #include "UIRegionsManager.h"
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
-#include "boards/sf32lb527/reader_ui.h"
+#ifdef READER_E0470A03
+#include "boards/reader/reader_ui.h"
 #include "reading_settings.h"
 #include "auto_turn.h"
-#include "boards/sf32lb527/standby_clock.h"
+#include "boards/reader/reader_board.h"
 #endif
 
 
@@ -119,8 +119,8 @@ void screen_set_main_selected_option(MainOption option)
 // 绘制主页面
 static void render_main_page(Renderer *renderer)
 {
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
-  reader527_home(renderer,main_option);return;
+#ifdef READER_E0470A03
+  reader_home(renderer,main_option);return;
 #endif
 
   clear_areas(); // 清除之前的区域记录
@@ -230,8 +230,8 @@ void handleMainPage(Renderer *renderer, UIAction action, bool needs_redraw)
 // 设置页面
 void render_settings_page(Renderer *renderer)
 {
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
-  reader527_settings(renderer);return;
+#ifdef READER_E0470A03
+  reader_settings(renderer);return;
 #endif
 
   clear_areas(); // 清除之前的区域记录
@@ -361,9 +361,9 @@ void render_settings_page(Renderer *renderer)
 // 返回值：0=继续，1=回主页，2=进阅读设置
 int handleSettingsPage(Renderer *renderer, UIAction action, bool needs_redraw)
 {
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#ifdef READER_E0470A03
   if(settings_selected_idx==SET_STANDBY&&(action==SELECT||action==SELECT_BOX)) {
-    if(reader527_standby_ram(renderer,false)) {
+    if(reader_standby_ram(renderer,false)) {
       render_settings_page(renderer);renderer->draw_text(24,renderer->get_page_height()-155,"待机失败，请检查 TF 卡");
     }
     return 0;

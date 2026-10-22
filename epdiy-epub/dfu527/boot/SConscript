@@ -2,9 +2,13 @@ import os
 from building import *
 Import('SIFLI_SDK')
 cwd=GetCurrentDir()
-upstream=os.path.join(SIFLI_SDK,'example/boot_loader/project/butterflmicro/board')
+family='sf32lb57x' if GetDepend('SOC_SF32LB57X') else 'butterflmicro'
+upstream=os.path.join(SIFLI_SDK,'example/boot_loader/project',family,'board')
 VariantDir('upstream',upstream,duplicate=0)
-src=[node for node in Glob('upstream/*.c') if os.path.basename(str(node))!='main.c']
+excluded={'main.c'}
+if family=='sf32lb57x':
+    excluded.update({'serial_transport.c','cdc_acm_transport.c'})
+src=[node for node in Glob('upstream/*.c') if os.path.basename(str(node)) not in excluded]
 src += Glob('boot_entry.c')
 group=DefineGroup('Reader527Boot',src,depend=[''],CPPPATH=[upstream,os.path.join(cwd,'../common')])
 objs=group+SConscript(os.path.join(cwd,'../common/SConscript'),variant_dir='core',duplicate=0)

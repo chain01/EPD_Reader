@@ -6,14 +6,14 @@
 #include <string>
 #include <algorithm>
 extern "C" {
-#include "board527.h"
+#include "reader_board.h"
 #include "board.h"
 #include "drv_flash.h"
 #include "../../../dfu527/common/reader_dfu.h"
 }
 extern int settings_selected_idx;
-volatile int reader527_light_hit=-1;
-volatile int reader527_dfu_hit=-1;
+volatile int reader_light_hit=-1;
+volatile int reader_dfu_hit=-1;
 
 static std::string fit(Renderer *r,const char *text,int width)
 {
@@ -39,18 +39,22 @@ static void button(Renderer *r,int index,int x,int y,int w,int h,const char *tex
     for(int n=0;n<(selected?3:1);++n)r->draw_rect(x+n,y+n,w-2*n,h-2*n,0);
     label(r,x,y,w,h,text);static_add_area(x,y,w,h,index);
 }
-void reader527_home(Renderer *r,int selected)
+void reader_home(Renderer *r,int selected)
 {
     clear_areas();r->clear_screen();int w=r->get_page_width(),h=r->get_page_height();
     label(r,0,60,w,80,"SIFLI READER");
     label(r,0,150,w,50,"书籍 · 字体 · 冷暖前光");
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+    const char *labels[]={"打开书库","功能设置","时钟待机","继续阅读"};
+#else
     const char *labels[]={"打开书库","功能设置","查看天气","继续阅读"};
+#endif
     int gap=24,side=24,cw=(w-2*side-gap)/2,ch=std::min(210,(h-360-gap)/2);
     int top=260;
     for(int i=0;i<4;++i)button(r,i,side+(i%2)*(cw+gap),top+(i/2)*(ch+gap),cw,ch,labels[i],i==selected);
     label(r,20,h-120,w-40,64,"轻点进入 · 阅读时上滑打开菜单");
 }
-void reader527_settings(Renderer *r)
+void reader_settings(Renderer *r)
 {
     clear_areas();r->clear_screen();int w=r->get_page_width(),h=r->get_page_height();
     label(r,0,20,w,64,"功能设置");
@@ -64,9 +68,13 @@ void reader527_settings(Renderer *r)
     int period=screen_get_full_refresh_period();
     if(period)rt_snprintf(texts[2],sizeof(texts[2]),"全刷：每 %d 次",period);
     else rt_snprintf(texts[2],sizeof(texts[2]),"全刷：每次");
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+    rt_snprintf(texts[3],sizeof(texts[3]),"离线阅读 · 网络未启用");
+#else
     rt_snprintf(texts[3],sizeof(texts[3]),"蓝牙：%s",bluetooth_ui_enabled?"开":"关");
+#endif
     rt_snprintf(texts[4],sizeof(texts[4]),"阅读设置");
-    unsigned cold=0,warm=0;board527_frontlight_get(&cold,&warm);
+    unsigned cold=0,warm=0;reader_board_frontlight_get(&cold,&warm);
     rt_snprintf(texts[5],sizeof(texts[5]),"前光：冷 %u%% / 暖 %u%%",cold,warm);
     rt_snprintf(texts[6],sizeof(texts[6]),"USB 固件升级");
     unsigned seconds=reading_auto_turn_seconds();
@@ -75,6 +83,9 @@ void reader527_settings(Renderer *r)
     rt_snprintf(texts[8],sizeof(texts[8]),"时钟待机 · 按电源键唤醒");
     for(int i=0;i<9;++i) {
         int y=top+i*(row+gap);
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+        if(i==SET_BLUETOOTH){label(r,body_x,y,body_w,row,texts[i]);continue;}
+#endif
         button(r,i*3+2,body_x,y,body_w,row,texts[i],settings_selected_idx==i);
         if((i>=SET_TIMEOUT&&i<=SET_BLUETOOTH)||i==SET_AUTO_TURN) {
             button(r,i*3,side,y,arrow-8,row,"-");
@@ -83,19 +94,43 @@ void reader527_settings(Renderer *r)
     }
     button(r,SET_CONFIRM*3+2,side,h-120,w-2*side,88,"返回主页",settings_selected_idx==SET_CONFIRM);
 }
-bool reader527_frontlight(Renderer *r,UIAction action)
+bool reader_frontlight(Renderer *r,UIAction action)
 {
-    unsigned cold=0,warm=0;board527_frontlight_get(&cold,&warm);
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+    static unsigned level=30,colour=1;
+    unsigned cold=0,warm=0;reader_board_frontlight_get(&cold,&warm);
+    if(cold||warm){level=std::max(cold,warm);colour=cold?(warm?1:0):2;}
     if(action==SELECT) {
-        int hit=reader527_light_hit;reader527_light_hit=-1;
+        int hit=reader_light_hit;reader_light_hit=-1;
+        if(hit==6)return false;
+        if(hit==0)level=level>=10?level-10:0;
+        if(hit==1)level=std::min(100u,level+10);
+        if(hit>=2&&hit<=4)colour=hit-2;
+        if(hit==5)level=0;
+        if(reader_board_frontlight_set(colour!=2?level:0,colour!=0?level:0))rt_kprintf("UI_FRONTLIGHT_ERROR\n");
+        reader_board_frontlight_get(&cold,&warm);
+    }
+    clear_areas();r->clear_screen();int w=r->get_page_width(),h=r->get_page_height();
+    label(r,0,35,w,80,"冷暖前光");label(r,0,140,w,60,"统一亮度 · 三种光色");
+    char value[64];rt_snprintf(value,sizeof(value),"亮度  %u%%",std::max(cold,warm));
+    label(r,100,310,w-200,90,value);
+    button(r,0,24,310,78,90,"-");button(r,1,w-102,310,78,90,"+");
+    const char *names[]={"冷光","混光","暖光"};int gap=16,cw=(w-48-2*gap)/3;
+    for(unsigned n=0;n<3;++n)button(r,n+2,24+n*(cw+gap),530,cw,100,names[n],colour==n);
+    cw=(w-68)/2;button(r,5,24,h-145,cw,96,"关闭前光");button(r,6,44+cw,h-145,cw,96,"返回设置");
+    return true;
+#else
+    unsigned cold=0,warm=0;reader_board_frontlight_get(&cold,&warm);
+    if(action==SELECT) {
+        int hit=reader_light_hit;reader_light_hit=-1;
         if(hit==5)return false;
         if(hit==0)cold=cold>=10?cold-10:0;
         if(hit==1)cold=std::min(100u,cold+10);
         if(hit==2)warm=warm>=10?warm-10:0;
         if(hit==3)warm=std::min(100u,warm+10);
         if(hit==4)cold=warm=0;
-        if(board527_frontlight_set(cold,warm))rt_kprintf("UI_FRONTLIGHT_ERROR\n");
-        board527_frontlight_get(&cold,&warm);
+        if(reader_board_frontlight_set(cold,warm))rt_kprintf("UI_FRONTLIGHT_ERROR\n");
+        reader_board_frontlight_get(&cold,&warm);
     }
     clear_areas();r->clear_screen();int w=r->get_page_width(),h=r->get_page_height();
     label(r,0,30,w,70,"冷暖前光");
@@ -114,13 +149,14 @@ bool reader527_frontlight(Renderer *r,UIAction action)
     button(r,4,24,h-145,cw,96,"关闭前光");
     button(r,5,24+cw+gap,h-145,cw,96,"返回设置");
     return true;
+#endif
 }
-bool reader527_dfu_page(Renderer *r,UIAction action)
+bool reader_dfu_page(Renderer *r,UIAction action)
 {
     static bool failed=false;
     if(action==NONE)failed=false;
     if(action==SELECT) {
-        int hit=reader527_dfu_hit;reader527_dfu_hit=-1;
+        int hit=reader_dfu_hit;reader_dfu_hit=-1;
         if(hit==1)return false;
         if(hit==0) {
             uint32_t vectors[2];
@@ -131,8 +167,8 @@ bool reader527_dfu_page(Renderer *r,UIAction action)
             else {
                 r->clear_screen();label(r,20,260,r->get_page_width()-40,90,"正在进入 USB 升级模式");
                 label(r,20,380,r->get_page_width()-40,90,"连接电脑，运行配套升级工具");
-                r->flush_display();board527_frontlight_set(0,0);board527_touch_power(0);
-                board527_display_off();HAL_Set_backup(RTC_BAKCUP_OTA_FORCE_MODE,R527_COOKIE);
+                r->flush_display();reader_board_frontlight_set(0,0);reader_board_touch_power(0);
+                reader_board_display_off();HAL_Set_backup(RTC_BAKCUP_OTA_FORCE_MODE,R527_COOKIE);
                 rt_thread_mdelay(100);drv_reboot();
             }
         }

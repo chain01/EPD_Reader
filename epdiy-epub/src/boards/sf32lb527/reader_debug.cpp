@@ -1,4 +1,4 @@
-#include "reader_ui.h"
+#include "../reader/reader_ui.h"
 #include "standby_clock.h"
 #include "UIRegionsManager.h"
 #include "type.h"
@@ -16,7 +16,7 @@ extern int settings_selected_idx;
 extern EpubListState epub_list_state;
 extern void handleUserInteraction(Renderer *,UIAction,bool);
 extern void back_to_main_page();
-extern void reader527_reading_settings_open(Renderer *);
+extern void reader_open_reading_settings(Renderer *);
 extern int reader527_power_measure(Renderer *,int);
 extern int reader527_lcpu_measure(Renderer *,int);
 extern int reader527_rail_measure(Renderer *,int);
@@ -89,7 +89,7 @@ bool reader527_debug_message(uint32_t msg,Renderer *r)
     }
     if(msg==DEBUG_DUMP){dump_frame();return true;}
     if(msg==DEBUG_DFU_ENTER) {
-        if(ui_state==USB_DFU_PAGE){reader527_dfu_hit=0;handleUserInteraction(r,SELECT,false);}
+        if(ui_state==USB_DFU_PAGE){reader_dfu_hit=0;handleUserInteraction(r,SELECT,false);}
         return true;
     }
     r->cancel_page_preview();
@@ -97,7 +97,7 @@ bool reader527_debug_message(uint32_t msg,Renderer *r)
     else if(msg==DEBUG_LIBRARY)ui_state=SELECTING_EPUB;
     else if(msg==DEBUG_SETTINGS)ui_state=SETTINGS_PAGE;
     else if(msg==DEBUG_LIGHT)ui_state=FRONTLIGHT_PAGE;
-    else if(msg==DEBUG_READING){reader527_reading_settings_open(r);}
+    else if(msg==DEBUG_READING){reader_open_reading_settings(r);}
     else if(msg==DEBUG_DFU)ui_state=USB_DFU_PAGE;
     handleUserInteraction(r,NONE,true);r->flush_display();
     rt_kprintf("UI_DEBUG_DONE state=%u\n",(unsigned)ui_state);return true;

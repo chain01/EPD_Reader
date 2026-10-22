@@ -1,0 +1,4 @@
+from building import *
+cwd = GetCurrentDir()
+group = DefineGroup('ReaderUI', Glob('*.cpp'), depend=['READER_E0470A03'], CPPPATH=[cwd])
+Return('group')

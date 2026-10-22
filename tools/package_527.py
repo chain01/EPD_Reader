@@ -9,6 +9,22 @@ import zlib
 from usb_dfu_527 import BOARD,load_package
 
 
+def factory_state(update):
+    words=[0x52444655,1,1,0x52454144,update['board'],1,3]
+    for image in update['images']:
+        words += [image['size'],image['crc32']]
+    record=struct.pack('<13I',*words)
+    record+=struct.pack('<I',zlib.crc32(record))
+    metadata=bytearray(b'\xff'*8192)
+    metadata[:len(record)]=record
+    # CRC(data || CRC(data)) has a fixed residue. With only FF padding every
+    # factory journal would have the same whole-file CRC, so sftool's CRC skip
+    # could retain the previous journal. Add a manifest fingerprint outside the
+    # boot record; the boot/parser and runtime journal format remain unchanged.
+    metadata[256:288]=hashlib.sha256(json.dumps(update,sort_keys=True).encode()).digest()
+    return bytes(metadata)
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -44,10 +60,7 @@ def main():
     (args.output/'update.json').write_text(json.dumps(update,indent=2)+'\n',encoding='utf-8')
     load_package(args.output) # Validate vectors, hashes and board before publishing.
     if args.factory:
-        words=[0x52444655,1,1,0x52454144,BOARD,1,3]
-        for i in images[:3]:words += [i['size'],i['crc32']]
-        record=struct.pack('<13I',*words);record+=struct.pack('<I',zlib.crc32(record))
-        metadata=record+b'\xff'*(8192-len(record))
+        metadata=factory_state(update)
         (args.output/'update_state.bin').write_bytes(metadata)
         images.insert(4,dict(path='update_state.bin',address='0x12f00000',size=len(metadata),
             sha256=hashlib.sha256(metadata).hexdigest(),crc32=zlib.crc32(metadata)))

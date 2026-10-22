@@ -7,7 +7,7 @@ extern "C" {
 #include "font_manager.h"
 #include "bf0_hal.h"
 }
-extern void reader527_close_book_for_power_test();
+extern void reader_close_book();
 extern rt_mq_t ui_queue;
 
 /* Park only buses fed by GE14 and the disabled touch controller. No NOR,
@@ -63,7 +63,7 @@ static void rail_wait(unsigned seconds)
 }
 int reader527_rail_measure(Renderer *r,int seconds)
 {
-    reader527_close_book_for_power_test();r->cancel_page_preview();board527_power_auto();
+    reader_close_book();r->cancel_page_preview();board527_power_auto();
     int font=font_manager_get_current(),size=epd_font_ft_get_size(),storage=0,rc=0,restore_rc=0;
     uint32_t ldo=hwp_pmuc->PERI_LDO;
     if(font_manager_select(0,32))return -1;

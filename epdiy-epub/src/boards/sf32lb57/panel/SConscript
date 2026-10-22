@@ -1,0 +1,6 @@
+from building import *
+import os
+cwd = GetCurrentDir()
+group = DefineGroup('EPDPanel', Glob('*.c'), depend=[],
+                    CPPPATH=[cwd, os.path.join(cwd, '../waveform')])
+Return('group')

@@ -118,7 +118,7 @@ bool EpubList::load(const char *path)
     perror("");
     renderer->flush_display();
     ulog_e(TAG, "Is SD-Card inserted and properly connected?\nCould not open directory %s", path);
-    #if !defined(UNIT_TEST) && !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
+    #if !defined(UNIT_TEST) && !defined(READER_E0470A03)
       rt_thread_delay(rt_tick_from_millisecond(1000*10));
       RT_ASSERT(0);
     #endif
