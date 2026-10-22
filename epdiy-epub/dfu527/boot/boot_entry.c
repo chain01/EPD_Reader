@@ -14,12 +14,24 @@ static int read_nor(uint32_t address,void *data,uint32_t size)
 static const r527_io reader_io={read_nor,0,0};
 static int recovery_key(void)
 {
+#ifdef SF32LB57X
     HAL_PIN_Set(PAD_PA34,GPIO_A34,PIN_PULLDOWN,1);
     GPIO_InitTypeDef cfg={.Pin=34,.Mode=GPIO_MODE_INPUT,.Pull=GPIO_PULLDOWN};
+#else
+    /* Original btn1 is PA33, active LOW. Boot only needs a digital
+     * pressed/not-pressed signal, not its application ADC key identity.
+     * PA34 is the hardware long-press reset and must never select recovery. */
+    HAL_PIN_Set(PAD_PA33,GPIO_A33,PIN_PULLUP,1);
+    GPIO_InitTypeDef cfg={.Pin=33,.Mode=GPIO_MODE_INPUT,.Pull=GPIO_PULLUP};
+#endif
     HAL_GPIO_Init(hwp_gpio1,&cfg);
-    /* Original firmware: KEY1=PA34, active HIGH. Require a sustained press. */
+    /* Require a sustained press; return immediately on a normal boot. */
     for(unsigned n=0;n<150;++n) {
+#ifdef SF32LB57X
         if(HAL_GPIO_ReadPin(hwp_gpio1,34)!=GPIO_PIN_SET)return 0;
+#else
+        if(HAL_GPIO_ReadPin(hwp_gpio1,33)!=GPIO_PIN_RESET)return 0;
+#endif
         HAL_Delay_us(10000);
     }
     return 1;

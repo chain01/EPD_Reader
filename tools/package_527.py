@@ -53,20 +53,76 @@ def main():
             sha256=hashlib.sha256(metadata).hexdigest(),crc32=zlib.crc32(metadata)))
         manifest = dict(chip='SF32LB52', memory='NOR', write_flash=dict(verify=True,
                         files=[dict(path=i['path'], address=i['address']) for i in images]))
-        (args.output / 'sftool_factory.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        (args.output / 'sftool_param.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        ini_lines = ['[FILEINFO]']
+        for index, image in enumerate(images):
+            ini_lines.extend((f"FILE{index}={image['path']}", f"ADDR{index}={image['address']}"))
+        ini_lines.append(f'NUM={len(images)}')
+        (args.output / 'ImgBurnList.ini').write_text('\n'.join(ini_lines) + '\n', encoding='utf-8')
     (args.output / 'images.json').write_text(json.dumps(images, indent=2) + '\n', encoding='utf-8')
-    (args.output / 'README.txt').write_text(
-        'SF32LB527 / E0470A03-AF-S, 684x1216 portrait\n'
-        'Make and verify a complete 16MiB NOR backup before first installation.\n'
-        'Routine update: enter USB upgrade from Settings, or hold the PA34 power key at boot.\n'
-        'Run: python usb_dfu_527.py --package <this-directory> --port <native-USB-COM-port>\n'
-        'update.json permits only application, font and waveform images.\n'
-        'The recovery protocol cannot write its own loader, bootloader or Flash table.\n'
-        + ('FACTORY INSTALLATION ONLY: sftool_factory.json also installs boot/recovery and initial state.\n'
-           'It must only be used with a verified full backup and serial/debug recovery access.\n' if args.factory else '')
-        + 'images.json records byte lengths and SHA-256. See DFU_SF32LB527.md for recovery/protection limits.\n', encoding='utf-8')
+    if args.factory:
+        (args.output / 'README.txt').write_text(
+            'SF32LB527 / E0470A03-AF-S, 684x1216 portrait\n'
+            'FACTORY SERIAL INSTALL PACKAGE for blank Flash or deliberate full recovery.\n'
+            'Read FACTORY_FIRST_FLASH.md before use; do not use this package for routine updates.\n'
+            'Run flash_factory.bat COMx. sftool_param.json and ImgBurnList.ini are included.\n'
+            'Recovery key: hold PA33 at boot. Hold the PA34 power key for 10 seconds to restart.\n'
+            'The recovery loader includes its own on-screen USB upgrade instructions.\n'
+            'images.json records every firmware image length, address, CRC32 and SHA-256.\n'
+            'After installation, use the protected USB updater for routine firmware updates.\n', encoding='utf-8')
+        (args.output / 'flash_factory.bat').write_text(
+            '@echo off\n'
+            'setlocal\n'
+            'pushd "%~dp0"\n'
+            'where sftool >nul 2>&1\n'
+            'if errorlevel 1 (\n'
+            '  echo ERROR: sftool was not found in PATH. Install the SiFli SDK tools first.\n'
+            '  popd\n'
+            '  exit /b 2\n'
+            ')\n'
+            'set "SERIAL_PORT=%~1"\n'
+            'if not defined SERIAL_PORT set /p SERIAL_PORT=Enter SF32LB527 download UART port (for example COM36): \n'
+            'if not defined SERIAL_PORT (\n'
+            '  echo ERROR: no serial port was provided.\n'
+            '  popd\n'
+            '  exit /b 2\n'
+            ')\n'
+            'if /I not "%SERIAL_PORT:~0,3%"=="COM" set "SERIAL_PORT=COM%SERIAL_PORT%"\n'
+            'echo Installing the SF32LB527 factory image set through %SERIAL_PORT%...\n'
+            'sftool -p "%SERIAL_PORT%" -c SF32LB52 -m nor write_flash --verify ^\n'
+            '  "ER_IROM1.bin@0x12200000" ^\n'
+            '  "ER_IROM2.bin@0x12400000" ^\n'
+            '  "epd_waveform.bin@0x12EC0000" ^\n'
+            '  "recovery.bin@0x12020000" ^\n'
+            '  "update_state.bin@0x12F00000" ^\n'
+            '  "ftab.bin@0x12000000" ^\n'
+            '  "bootloader.bin@0x12010000"\n'
+            'set "FLASH_RC=%ERRORLEVEL%"\n'
+            'if not "%FLASH_RC%"=="0" (\n'
+            '  echo ERROR: serial flashing failed with exit code %FLASH_RC%.\n'
+            '  popd\n'
+            '  exit /b %FLASH_RC%\n'
+            ')\n'
+            'echo Flash write and verification completed. The tool will reset the board.\n'
+            'popd\n'
+            'exit /b 0\n', encoding='utf-8')
+    else:
+        (args.output / 'README.txt').write_text(
+            'SF32LB527 / E0470A03-AF-S, 684x1216 portrait\n'
+            'Routine USB update package for a board that already has the protected recovery loader.\n'
+            'Enter USB upgrade from Settings, or hold the PA33 recovery key at boot.\n'
+            'Run: python usb_dfu_527.py --package <this-directory> --port <native-USB-COM-port>\n'
+            'update.json permits only application, font and waveform images.\n'
+            'The recovery protocol cannot write its own loader, bootloader or Flash table.\n'
+            'images.json records byte lengths and SHA-256. See DFU_SF32LB527.md for recovery/protection limits.\n', encoding='utf-8')
     shutil.copy2(root/'tools/usb_dfu_527.py',args.output/'usb_dfu_527.py')
-    for name in ('DFU_SF32LB527.md','BOARD_SF32LB527.md','VALIDATION_SF32LB527.md','VALIDATION_PREFETCH_527.md','VALIDATION_WAVEPREP_527.md','VALIDATION_FONT_POWER_527.md','VALIDATION_POWER_DIAG_527.md','MINIMUM_POWER_527.md','POWER_STEPS_527.md','TF_POWER_527.md','AUTO_TURN_527.md','STANDBY_CLOCK_527.md'):
+    doc_names = ('DFU_SF32LB527.md','BOARD_SF32LB527.md') if args.factory else (
+        'DFU_SF32LB527.md','BOARD_SF32LB527.md','VALIDATION_SF32LB527.md','VALIDATION_PREFETCH_527.md',
+        'VALIDATION_WAVEPREP_527.md','VALIDATION_FONT_POWER_527.md','VALIDATION_POWER_DIAG_527.md',
+        'MINIMUM_POWER_527.md','POWER_STEPS_527.md','TF_POWER_527.md','AUTO_TURN_527.md','STANDBY_CLOCK_527.md')
+    if args.factory:
+        doc_names += ('FACTORY_FIRST_FLASH.md',)
+    for name in doc_names:
         shutil.copy2(root/name,args.output/name)
     print(f'Packaged {len(images)} images in {args.output.resolve()}')
 

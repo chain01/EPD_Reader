@@ -41,7 +41,9 @@ The build produces separate main code and built-in font images under `main.bin/`
 
 Before first installation, read and verify the complete 16MiB NOR, not only the application partition. Keep that backup private and separate from the public source and flash bundle. The TF card is not formatted by this BSP. This image layout differs from the original application and standalone diagnostic firmware.
 
-`package_527.py` validates board, vectors, sizes and hashes. Its default `usb_update/` output contains only the three permitted update images and the USB tool. Explicit `--factory` additionally packages boot/recovery, initial state and `sftool_factory.json`; CI places this separately under `factory_install/`. Packaging never accesses the serial port or flashes the board.
+`package_527.py` validates board, vectors, sizes and hashes. Its default `usb_update/` output contains only the three permitted update images and the USB tool. Explicit `--factory` additionally packages boot/recovery, initial state, `sftool_param.json` and `ImgBurnList.ini`; CI places this separately under `factory_install/`. Packaging never accesses the serial port or flashes the board.
+
+The [Windows flash GUI](tools/flash_gui/README.md) supports both sftool serial factory installation and protected native USB updates. It imports ZIP, JSON and INI packages; USB mode selects only application/font/waveform and requires device-side readback verification before requesting reboot. USB transport reuses the CLI wire protocol in `tools/usb_dfu_527.py`.
 
 ## Driver integration
 
@@ -63,7 +65,7 @@ Before first installation, read and verify the complete 16MiB NOR, not only the 
 
 The new board automatically enters retained deep sleep while waiting for input after background work finishes. Touch IRQ PA44 is configured as AON PIN20; touch and frontlight supply rails remain stable. The CPU and memory sleep/resume path has been exercised on hardware; physical touch-wake acceptance and whole-board current measurements remain pending. Battery/charger routing and physical keys have not been validated. The BSP does not reuse old-board ADC/key assignments. Bluetooth/PAN and weather code are retained but require separate end-to-end validation with a phone/network.
 
-The recovery boot path now uses the original firmware's PA34 active-high power-key definition; it does not enable the reader's general button/ADC driver. USB recovery is also available from Settings, and is selected automatically after interrupted updates or failed image checks.
+The recovery boot path uses PA33 as an active-low GPIO input with pull-up and a 1.5-second hold, independently of the PA34 hardware reset/power key. Boot does not enable the application ADC button driver. Existing devices need a separately verified first-stage boot update over debug UART for this change to take effect; normal USB application updates cannot replace the protected bootloader. USB recovery is also available from Settings, and is selected automatically after interrupted updates or failed image checks.
 
 ## Validation status
 
