@@ -185,6 +185,7 @@ class Tests(unittest.TestCase):
         for kwargs, expected in [({}, None), ({'body_board': 1}, ValueError), ({'corrupt': True}, ValueError),
                                  ({'wrong_sequence': True}, ValueError), ({'status': -4}, RuntimeError)]:
             device = CancellableRecovery.__new__(CancellableRecovery)
+            device.board = protocol.BOARD
             device.cancel, device.sequence, device.serial = self.cancel, 15, FakeSerial(**kwargs)
             if expected:
                 with self.assertRaises(expected):

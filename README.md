@@ -1,5 +1,8 @@
 # epub 电子书阅读器
 
+代码入口、双板共用层、驱动边界和检查命令见[代码导航](CODE_MAP.md)。
+主机回归统一运行 `python tools/run_host_tests.py`（Python 3、gcc、g++）。
+
 SF32LB57GY + E0470A03-AF-S 使用 `sf32lb57gy-oed-e0470a03_hcpu` 目标，
 竖屏 UI 为 684×1216，支持显示、触摸、冷暖前光、TF、时钟待机和受保护 USB 升级。
 正文和菜单共用优化局刷，减轻旧文字残影；接线、编译及烧录见

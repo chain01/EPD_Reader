@@ -30,7 +30,7 @@ static struct PMU {uint32_t WER=0,PERI_LDO=0;} pmu;
 #define __HAL_RTC_WAKEUPTIMER_CLEAR_FLAG(...) ((void)0)
 struct RTC_HandleTypeDef {RTC *Instance;};
 static int step(const char *name,int index){events.push_back(name);return fail_at==index?-1:0;}
-static void reader527_close_book_for_power_test(){events.push_back("close_books");}
+static void reader_close_book(){events.push_back("close_books");}
 static int font_manager_select(int,int){return step("builtin_font",1);}
 static void clear_areas(){}
 static int board527_storage_test_begin(){return step("unmount",2);}

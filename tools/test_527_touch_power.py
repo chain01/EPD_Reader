@@ -76,7 +76,7 @@ static struct {uint32_t PERI_LDO;} pmu;
 #define I2C1_SCL 100
 #define I2C1_SDA 101
 #define PIN_NOPULL 0
-static void reader527_close_book_for_power_test(){}
+static void reader_close_book(){}
 static void board527_power_auto(){}
 static int board_tf_present(){return card_present;}
 static int font_manager_select(int,int){return prep_fail==1?-1:0;}

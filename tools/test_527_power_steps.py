@@ -32,7 +32,7 @@ static int rt_pin_read(int){return !aw_reset;}
 static unsigned tf_msd_read_count(){return 0;}
 static void board527_power_stats(uint32_t *count,uint32_t *ms){*count=waits;*ms=waits*5000;}
 struct Renderer {void cancel_page_preview(){}};
-static void reader527_close_book_for_power_test(){}
+static void reader_close_book(){}
 static void board527_power_auto(){}
 static int font_manager_select(int,int){return fail_at==1?-1:0;}
 static int board527_frontlight_set(int,int){return fail_at==2?-1:0;}
