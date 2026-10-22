@@ -28,13 +28,13 @@ python tools/usb_dfu_527.py --package firmware-527 --port COM42
 .\build-sf32lb527.ps1
 # 日常 USB 更新包，不包含恢复程序或启动程序
 python tools/package_527.py --output firmware-527
-# 仅首次安装/工厂维修，必须保留串口或调试恢复通道及完整 Flash 备份
+# 仅空白 Flash 首刷或工厂维修：通过 SoC 下载 UART 使用 sftool
 python tools/package_527.py --factory --output factory-527
 ```
 
 日常包仅有应用、内置字体、波形三个目标，`update.json` 固定板型、布局、文件长度、CRC32 和 SHA-256。工具在连接设备前核验文件，并通过设备握手确认板型。没有任意地址、整片擦除、bootloader 更新或 DFU 自更新参数。
 
-首次安装包另外包含 `recovery.bin`、`bootloader.bin`、`ftab.bin` 与初始升级状态。`sftool_factory.json` 仅用于具备串口/调试访问条件的首次安装，不应分发给普通 USB 升级用户。其写入顺序先准备应用、恢复程序和状态，最后安装启动程序。原有 R9 五镜像包不能作为新的日常升级包。
+首次安装包另外包含 `recovery.bin`、`bootloader.bin`、`ftab.bin` 与初始升级状态，并生成 `flash_factory.bat` 和 `FACTORY_FIRST_FLASH.md`。空白 Flash 没有可备份的旧内容；对已有数据的设备执行工厂重装前，应先备份完整 NOR。首刷通过 SoC 下载 UART/ROM 串口下载模式完成，不能用应用启动后枚举的原生 USB CDC 恢复端口代替。脚本依次写入应用、字体、波形、恢复程序、升级状态、Flash 表，最后写入首级启动程序并校验。不要添加全片擦除参数。普通用户日常更新仍使用受保护 USB 更新包。
 
 ## 固定边界与断电恢复
 
