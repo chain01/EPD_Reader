@@ -41,7 +41,9 @@ The build produces separate main code and built-in font images under `main.bin/`
 
 Before first installation, read and verify the complete 16MiB NOR, not only the application partition. Keep that backup private and separate from the public source and flash bundle. The TF card is not formatted by this BSP. This image layout differs from the original application and standalone diagnostic firmware.
 
-`package_527.py` validates board, vectors, sizes and hashes. Its default `usb_update/` output contains only the three permitted update images and the USB tool. Explicit `--factory` additionally packages boot/recovery, initial state and `sftool_factory.json`; CI places this separately under `factory_install/`. Packaging never accesses the serial port or flashes the board.
+`package_527.py` validates board, vectors, sizes and hashes. Its default `usb_update/` output contains only the three permitted update images and the USB tool. Explicit `--factory` additionally packages boot/recovery, initial state, `sftool_param.json` and `ImgBurnList.ini`; CI places this separately under `factory_install/`. Packaging never accesses the serial port or flashes the board.
+
+The [Windows flash GUI](tools/flash_gui/README.md) supports both sftool serial factory installation and protected native USB updates. It imports ZIP, JSON and INI packages; USB mode selects only application/font/waveform and requires device-side readback verification before requesting reboot. USB transport reuses the CLI wire protocol in `tools/usb_dfu_527.py`.
 
 ## Driver integration
 

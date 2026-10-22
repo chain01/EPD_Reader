@@ -1,6 +1,6 @@
 # USB 恢复升级（SF32LB527）
 
-此板的 USB D+/D− 直接接主控。恢复程序使用 **USB CDC 虚拟串口**，配套工具为 `tools/usb_dfu_527.py`；不是 `dfu-util` 使用的 USB DFU 类协议。USB 底层复用固定 SDK 的 CherryUSB/MUSB 实现，参考 [SiFli USB-CDC 升级示例](https://docs.sifli.com/projects/sdk/latest/sf32lb52x/example/dfu_v2/cdc/app/README.html)。
+此板的 USB D+/D− 直接接主控。恢复程序使用 **USB CDC 虚拟串口**，可使用 [Windows 图形升级工具](tools/flash_gui/README.md)或命令行 `tools/usb_dfu_527.py`；不是 `dfu-util` 使用的 USB DFU 类协议。USB 底层复用固定 SDK 的 CherryUSB/MUSB 实现，参考 [SiFli USB-CDC 升级示例](https://docs.sifli.com/projects/sdk/latest/sf32lb52x/example/dfu_v2/cdc/app/README.html)。
 
 ## 进入与退出
 
@@ -25,6 +25,17 @@
 提示图存储为原生1216×684的1bpp数据，不包含字体文件；可用`python tools/make_527_recovery_screen.py --font <CJK字体路径> --preview <预览PNG路径>`重生成。构建自动将它与固定面板波形嵌入恢复程序，无需在CI安装图形或字体依赖。
 
 CDC 使用 SDK 示例的开发 VID/PID `38F4:0001`；产品量产前应使用有权分配的 USB 标识。
+
+## Windows 图形工具
+
+1. 按上面的菜单或 PA33 入口进入恢复模式，连接原生 USB 数据线。
+2. 运行 `SiFliFlashTool.exe`，选择“原生 USB DFU”。工具按 VID/PID 和恢复序列号自动识别设备；多台设备时需选择目标端口。
+3. 加载完整固件 ZIP、固件目录、`sftool_param.json`、`ImgBurnList.ini` 或 `update.json`。USB 模式仅显示应用、字体、波形三个目标。
+4. 点击“开始 USB 升级”，设备端读回校验成功后自动请求重启。失败或中止后重新完整升级，不支持断点续传。
+
+“读取设备”仅查询恢复状态；“重启退出升级”由设备先确认固件可启动。图形工具也支持串口首刷和手动文件/地址，但串口模式可以写引导与恢复分区，必须与受保护的日常 USB 模式区分。工具不能通过主机命令将正在运行的阅读器切入恢复，请先使用设备菜单或 PA33。
+
+## 命令行工具
 
 ```powershell
 python -m pip install pyserial
@@ -67,5 +78,9 @@ CRC/SHA 在此用于传输与存储完整性，**不是固件签名验证**。�
 ## 检查
 
 `python tools/test_527_dfu.py` 编译实际存储核心，在模拟 NOR 中验证：28 个擦写步骤的操作前/半写入断电、重新升级、保护区不变、错误板型/越界/整数极值、未完成提交、三种镜像损坏。构建与真实 USB 枚举/更新验证需分别记录，主机测试不等于 USB 联调完成。
+
+`python -m unittest discover -s tools/flash_gui -p 'test_*.py' -v` 运行图形工具的无界面后端回归，覆盖清单/ZIP、串口进程成功/失败/中止，以及 USB 目标边界、包校验、分片应答、帧 CRC/板型/序号拒绝、写入偏移错误、提交失败不重启和取消不提交。该测试不访问真实端口，已接入 527 CI。
+
+图形工具 v1.1.0 的 18 项后端测试、串口/USB 切换、完整包七个分区与 USB 三个目标的切换、独立 EXE 启动均通过；COM38 实机恢复设备信息读取返回 `READY`。本次图形工具集成未实际重写 Flash，完整硬件升级记录仍以此前命令行联调为准。
 
 实物验证还包括错误目标/偏移拒绝；只传应用前 2KiB 后断电，设备自动停留在恢复模式；重传三个完整镜像并重启成功；最后独立回读首级启动程序、恢复程序和 Flash 表，SHA-256 与安装时一致。详情见 [验证记录](VALIDATION_SF32LB527.md)。

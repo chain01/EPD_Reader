@@ -59,6 +59,7 @@ jobs:
         python3 tools/test_527_boot_key.py
         python3 tools/test_527_recovery_screen.py
         python3 tools/test_527_dfu_package.py
+        python3 -m unittest discover -s tools/flash_gui -p 'test_*.py' -v
         
     - name: Build ${{ matrix.target }}
       run: |
