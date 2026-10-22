@@ -1,7 +1,7 @@
 """Update the SF32LB527 reader over native USB CDC. No raw-address or erase command.
 
 The recovery image must first be installed with the factory bundle.
-Install pyserial, enter USB upgrade from Settings (or hold PA34 at boot), then:
+Install pyserial, enter USB upgrade from Settings (or hold PA33 at boot), then:
     python tools/usb_dfu_527.py --package firmware-527 --port COM42
 """
 import argparse

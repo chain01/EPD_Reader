@@ -49,6 +49,7 @@ class Package:
     verify: bool = True
     origin: str = ''
     temporary: tempfile.TemporaryDirectory | None = field(default=None, repr=False)
+    usb_only: bool = False
 
     def close(self):
         if self.temporary:
@@ -103,8 +104,11 @@ def load_manifest(path: Path, boundary: Path | None = None) -> Package:
     images = []
     if path.suffix.lower() == '.json':
         data = json.loads(read_text(path))
+        if isinstance(data, dict) and {'board', 'layout', 'protocol', 'images'} <= data.keys():
+            from usb_core import load_update_manifest
+            return load_update_manifest(path)
         if not isinstance(data, dict) or 'write_flash' not in data:
-            raise ValueError('请选择 sftool_param.json；update.json / images.json 不是串口烧录清单。')
+            raise ValueError('请选择 sftool_param.json 或 USB 升级清单 update.json；images.json 不是烧录清单。')
         chip = str(data.get('chip', 'SF32LB52')).upper()
         memory = str(data.get('memory', 'nor')).lower()
         write = data['write_flash']
@@ -148,6 +152,8 @@ def load_manifest(path: Path, boundary: Path | None = None) -> Package:
 
 def find_manifest(root: Path) -> Path:
     candidates = [p for p in root.rglob('*') if p.is_file() and p.name.lower() in ('sftool_param.json', 'imgburnlist.ini')]
+    if not candidates:
+        candidates = [p for p in root.rglob('*') if p.is_file() and p.name.lower() == 'update.json']
     if not candidates:
         # Also accept a differently named, valid sftool JSON at package root.
         for p in root.glob('*.json'):
@@ -206,7 +212,7 @@ def load_package(path: Path) -> Package:
         # When both SDK formats are present, reject discrepancies rather than
         # silently burning the other format's image set.
         companion = next((p for p in manifest.parent.iterdir() if p.name.lower() == 'imgburnlist.ini'), None)
-        if manifest.suffix.lower() == '.json' and companion:
+        if manifest.suffix.lower() == '.json' and companion and not package.usb_only:
             other = load_manifest(companion, boundary)
             if [(i.path, i.address) for i in package.images] != [(i.path, i.address) for i in other.images]:
                 raise ValueError('JSON 与 INI 的烧录文件或地址不一致。')

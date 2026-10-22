@@ -1,4 +1,4 @@
-"""Windows GUI for SiFli serial Flash installation using sftool."""
+"""SiFli serial Flash and protected SF32LB527 native USB recovery GUI."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -12,8 +12,9 @@ from tkinter import filedialog, messagebox, ttk
 
 from serial.tools import list_ports
 from flash_core import AFTER, BEFORE, CHIPS, MEMORIES, Image, address, command, find_sftool, load_package, run, validate
+from usb_core import Cancelled, prepare_update, recovery_port, run_usb, select_targets
 
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 
 
 class App(tk.Tk):
@@ -32,6 +33,11 @@ class App(tk.Tk):
         self.log_path = None
         self.port_names = {}
         self.controls = []
+        self.transport = tk.StringVar(value='serial')
+        self.active_transport = 'serial'
+        self.transport_images = {}
+        self.usb_only = False
+        self.footer_text = tk.StringVar()
         self.port = tk.StringVar()
         self.chip = tk.StringVar(value='SF32LB52')
         self.memory = tk.StringVar(value='nor')
@@ -47,7 +53,9 @@ class App(tk.Tk):
         self._style()
         self._build()
         self.scan_ports()
+        self.apply_transport()
         self.after(80, self.poll)
+        self.after(1500, self.rescan)
         self.protocol('WM_DELETE_WINDOW', self.close)
 
     def _style(self):
@@ -78,18 +86,24 @@ class App(tk.Tk):
         heading = ttk.Frame(self, padding=(20, 15, 20, 6))
         heading.pack(fill='x')
         ttk.Label(heading, text='SiFli 固件烧录', font=('Microsoft YaHei UI', 21, 'bold')).pack(side='left')
-        ttk.Label(heading, text='串口首刷 / 完整固件更新', style='Muted.TLabel').pack(side='left', padx=18, pady=(10, 0))
+        ttk.Label(heading, text='串口首刷 / 原生 USB 升级', style='Muted.TLabel').pack(side='left', padx=18, pady=(10, 0))
         toolbar = ttk.Frame(self, padding=(20, 8))
         toolbar.pack(fill='x')
         self.button(toolbar, '加载 ZIP / JSON / INI', self.choose_package, style='Accent.TButton').pack(side='left')
         self.button(toolbar, '识别固件文件夹', self.choose_directory).pack(side='left', padx=8)
         self.button(toolbar, '添加固件 + 地址', self.add).pack(side='left')
+        for title, value in [('原生 USB DFU', 'usb'), ('串口烧录', 'serial')]:
+            radio = ttk.Radiobutton(toolbar, text=title, variable=self.transport, value=value, command=self.change_transport)
+            radio.pack(side='right', padx=10)
+            self.controls.append(radio)
         ttk.Label(self, textvariable=self.origin, style='Muted.TLabel', padding=(20, 0, 20, 6), wraplength=1120).pack(fill='x')
 
         settings = ttk.LabelFrame(self, text='连接与烧录参数', padding=10)
+        self.serial_settings = settings
         settings.pack(fill='x', padx=20, pady=4)
         ttk.Label(settings, text='下载串口').grid(row=0, column=0, sticky='w')
         self.ports = self.combo(settings, self.port, [], 31)
+        self.serial_ports = self.ports
         self.ports.grid(row=0, column=1, sticky='ew', padx=6)
         self.button(settings, '刷新', self.scan_ports).grid(row=0, column=2, padx=(0, 14))
         ttk.Label(settings, text='芯片').grid(row=0, column=3)
@@ -114,7 +128,22 @@ class App(tk.Tk):
         self.button(settings, '选择工具', self.choose_tool).grid(row=2, column=8, pady=(9, 0))
         settings.columnconfigure(1, weight=1)
 
+        self.usb_settings = ttk.LabelFrame(self, text='原生 USB DFU · SF32LB527 阅读器', padding=10)
+        usb_row = ttk.Frame(self.usb_settings)
+        usb_row.pack(fill='x')
+        ttk.Label(usb_row, text='USB 恢复设备').pack(side='left')
+        self.usb_ports = self.combo(usb_row, self.port, [], 43)
+        self.usb_ports.pack(side='left', fill='x', expand=True, padx=8)
+        self.button(usb_row, '刷新', self.scan_ports).pack(side='left')
+        self.button(usb_row, '读取设备', lambda: self.usb_action('info')).pack(side='left', padx=8)
+        self.button(usb_row, '重启退出升级', lambda: self.usb_action('reboot')).pack(side='left')
+        ttk.Label(self.usb_settings, text='先在阅读器设置中进入 USB 升级，或按住 PA33 再复位；接入原生 USB 后自动识别恢复设备。',
+                  style='Muted.TLabel', wraplength=1090).pack(fill='x', pady=(9, 0))
+        ttk.Label(self.usb_settings, text='仅更新应用、字体、波形，强制设备端读回校验；引导与恢复程序受保护。长按电源键约 10 秒可硬件重启。',
+                  style='Muted.TLabel', wraplength=1090).pack(fill='x', pady=(5, 0))
+
         files = ttk.LabelFrame(self, text='烧录列表 · 地址为十六进制，可双击编辑', padding=8)
+        self.files_frame = files
         files.pack(fill='both', expand=True, padx=20, pady=(8, 4))
         files.columnconfigure(0, weight=1)
         files.rowconfigure(0, weight=1)
@@ -154,7 +183,7 @@ class App(tk.Tk):
         self.log.configure(yscrollcommand=scroll.set)
         footer = ttk.Frame(self, padding=(20, 0, 20, 10))
         footer.pack(fill='x')
-        ttk.Label(footer, text='完整首刷请使用下载 UART；应用里的 USB 恢复端口使用对应的 USB 升级工具。', style='Muted.TLabel').pack(side='left')
+        ttk.Label(footer, textvariable=self.footer_text, style='Muted.TLabel').pack(side='left')
         ttk.Button(footer, text='保存日志', command=self.save_log).pack(side='right')
         # Reserve controls and logs first; the scrollable image list shrinks
         # on shorter displays instead of hiding the lower controls.
@@ -164,11 +193,57 @@ class App(tk.Tk):
     def scan_ports(self):
         previous = self.port.get().split(' ', 1)[0]
         ports = sorted(list_ports.comports(), key=lambda p: (len(p.device), p.device))
+        if self.transport.get() == 'usb':
+            ports = [p for p in ports if recovery_port(p)]
         names = [f'{p.device}  {p.description}' for p in ports]
         self.port_names = {name: p.device for name, p in zip(names, ports)}
         self.ports['values'] = names
         match = next((name for name in names if self.port_names[name] == previous), None)
         self.port.set(match or (names[0] if len(names) == 1 else ''))
+
+    def rescan(self):
+        if self.mode == 'idle' and self.transport.get() == 'usb':
+            self.scan_ports()
+        self.after(1500, self.rescan)
+
+    def apply_transport(self):
+        usb = self.transport.get() == 'usb'
+        self.serial_settings.pack_forget()
+        self.usb_settings.pack_forget()
+        panel = self.usb_settings if usb else self.serial_settings
+        panel.pack(fill='x', padx=20, pady=4, before=self.files_frame)
+        self.ports = self.usb_ports if usb else self.serial_ports
+        self.start_button['text'] = '开始 USB 升级' if usb else '开始烧录'
+        self.stop_button['text'] = '停止升级' if usb else '停止烧录'
+        self.files_frame['text'] = ('USB 升级列表 · 仅应用、字体和波形三个固定分区' if usb
+                                    else '烧录列表 · 地址为十六进制，可双击编辑')
+        self.footer_text.set('USB 升级写入固定的三个分区；校验通过后自动重启。' if usb else '空片首刷与完整重烧使用下载 UART；原生 USB 端口请切换到 USB DFU 模式。')
+        self.scan_ports()
+
+    def change_transport(self):
+        if self.mode != 'idle':
+            return
+        previous = self.active_transport
+        selected = self.transport.get()
+        if previous != selected:
+            current = [self.rows[key] for key in self.table.get_children()]
+            self.transport_images[previous] = current
+            images = self.transport_images.get(selected)
+            if images is None:
+                images = select_targets(current) if selected == 'usb' else current
+            self.replace_rows(images)
+            self.active_transport = selected
+        self.apply_transport()
+        self.status.set('USB 模式：请选择三个升级镜像或加载完整固件包，并连接恢复设备。' if selected == 'usb'
+                        else '串口模式：核对文件地址与下载串口后开始烧录。')
+
+    def replace_rows(self, images):
+        for key in self.table.get_children():
+            self.table.delete(key)
+        self.rows.clear()
+        for image in images:
+            self.put(image)
+        self.refresh()
 
     def choose_tool(self):
         value = filedialog.askopenfilename(title='选择 SiFli sftool', filetypes=[('sftool', '*.exe'), ('所有文件', '*.*')])
@@ -229,6 +304,8 @@ class App(tk.Tk):
         for package in self.packages:
             package.close()
         self.packages.clear()
+        self.transport_images.clear()
+        self.usb_only = False
         self.origin.set('手动烧录列表')
         self.refresh()
 
@@ -307,7 +384,12 @@ class App(tk.Tk):
     def start(self):
         if self.mode != 'idle':
             return
+        if self.transport.get() == 'usb':
+            self.usb_action('update')
+            return
         try:
+            if self.usb_only:
+                raise ValueError('update.json 是 USB 升级清单，请切换到原生 USB DFU；串口首刷请选择 sftool_param.json 或 ImgBurnList.ini。')
             images = [self.rows[key] for key in self.table.get_children()]
             port = self.port_names.get(self.port.get(), '')
             args = command(Path(self.tool.get()), port, self.chip.get(), self.memory.get(),
@@ -335,8 +417,44 @@ class App(tk.Tk):
                 self.events.put(('error', f'烧录执行失败：{error}'))
         threading.Thread(target=worker, daemon=True).start()
 
+    def usb_action(self, action):
+        if self.mode != 'idle' or self.transport.get() != 'usb':
+            return
+        try:
+            port = self.port_names.get(self.port.get(), '')
+            available = [p.device for p in list_ports.comports() if recovery_port(p)]
+            if port not in available:
+                raise ValueError('未找到所选 SF32LB527 USB 恢复设备。请先进入 USB 升级模式，再接入原生 USB 数据线。')
+            images = [self.rows[key] for key in self.table.get_children()]
+            prepared = prepare_update(images) if action == 'update' else None
+            log_dir = Path(os.environ.get('LOCALAPPDATA', Path.home()))/'SiFliFlashTool/logs'
+            log_dir.mkdir(parents=True, exist_ok=True)
+            self.log_path = log_dir/(datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.log')
+            self.log_handle = self.log_path.open('w', encoding='utf-8')
+        except Exception as error:
+            messagebox.showerror('无法开始 USB 操作', str(error), parent=self)
+            return
+        self.cancel.clear()
+        self.progress['value'] = 0
+        self.percent.set('当前阶段：0%')
+        self.busy('flashing')
+        self.status.set('正在连接原生 USB 恢复设备…')
+        self.append_log('\n' + datetime.now().isoformat(timespec='seconds') + f' USB {action} · {port}')
+        self.append_log('USB 使用受保护的固定分区协议，不调用 sftool，不写引导与恢复程序。')
+        def worker():
+            try:
+                result = run_usb(port, action, prepared, lambda kind, value: self.events.put((kind, value)), self.cancel)
+                self.events.put(('usb_done', result))
+            except Cancelled as error:
+                self.events.put(('usb_done', str(error)))
+            except Exception as error:
+                self.events.put(('error', f'USB 操作失败：{error}；请保持恢复模式并重新尝试。'))
+        threading.Thread(target=worker, daemon=True).start()
+
     def stop(self):
-        if self.mode == 'flashing' and messagebox.askyesno('停止烧录', '停止后固件可能不完整，需要重新完整烧录。是否停止？', parent=self):
+        prompt = ('停止后设备保留在 USB 恢复模式，可能需要重新完整升级。是否停止？' if self.transport.get() == 'usb'
+                  else '停止后固件可能不完整，需要重新完整烧录。是否停止？')
+        if self.mode == 'flashing' and messagebox.askyesno('停止当前操作', prompt, parent=self):
             self.cancel.set()
             self.stop_button['state'] = 'disabled'
             self.status.set('正在停止烧录…')
@@ -358,18 +476,37 @@ class App(tk.Tk):
             elif kind == 'progress':
                 self.progress['value'] = value
                 self.percent.set(f'当前阶段：{value}%')
+            elif kind == 'phase':
+                self.status.set(value)
+                self.append_log(value)
             elif kind == 'imported':
                 self.busy('idle')
                 self.clear_files()
                 self.packages.append(value)
+                self.usb_only = value.usb_only
+                if value.usb_only:
+                    self.transport.set('usb')
+                    self.active_transport = 'usb'
+                    self.apply_transport()
                 self.chip.set(value.chip)
                 self.memory.set(value.memory)
                 self.verify.set(value.verify)
-                for item in value.images:
-                    self.put(item)
+                self.transport_images['serial'] = value.images
+                self.transport_images['usb'] = select_targets(value.images)
+                images = self.transport_images[self.transport.get()]
+                self.replace_rows(images)
                 self.origin.set('已加载：' + value.origin)
-                self.status.set('清单与文件检查通过 · 可编辑地址及顺序，确认串口后开始烧录')
+                self.status.set('升级包检查通过 · 连接原生 USB 恢复设备后开始升级' if self.transport.get() == 'usb'
+                                else '清单与文件检查通过 · 可编辑地址及顺序，确认串口后开始烧录')
                 self.append_log(f'加载成功：{value.origin} · {len(value.images)} 个文件')
+                if self.transport.get() == 'usb' and len(value.images) != len(images):
+                    self.append_log(f'USB 仅选取 {len(images)} 个升级镜像，跳过 {len(value.images)-len(images)} 个其他分区；保护引导与恢复程序。')
+            elif kind == 'usb_done':
+                self.busy('idle')
+                self.status.set(value)
+                self.append_log(value)
+                self.finish_log()
+                self.scan_ports()
             elif kind == 'done':
                 code, cancelled = value
                 self.busy('idle')
