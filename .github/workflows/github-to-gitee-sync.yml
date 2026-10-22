@@ -10,6 +10,8 @@ on:
 
 jobs:
   mirror-sync:
+    # This mirror writes to the upstream SiFli organization, not a fork's remote.
+    if: github.repository == 'OpenSiFli/EPD_Reader'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
