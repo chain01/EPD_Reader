@@ -27,17 +27,10 @@
 命令行等价写法如下：
 
 ```bat
-sftool -p COM36 -c SF32LB52 -m nor write_flash --verify ^
-  "ER_IROM1.bin@0x12200000" ^
-  "ER_IROM2.bin@0x12400000" ^
-  "epd_waveform.bin@0x12EC0000" ^
-  "recovery.bin@0x12020000" ^
-  "update_state.bin@0x12F00000" ^
-  "ftab.bin@0x12000000" ^
-  "bootloader.bin@0x12010000"
+sftool -p COM36 config sftool_param.json
 ```
 
-启动程序最后写入。不要添加 `--erase-all`，不要更改地址或打乱镜像；脚本只写入列出的目标区域。
+也可以运行 `flash_factory.bat COM36`；它直接传入同一组镜像和地址。两种方式都启用写后校验。启动程序最后写入。不要添加 `--erase-all`，不要更改地址或打乱镜像；清单只列出应写入的目标区域。
 
 ## 包内镜像
 
@@ -51,7 +44,7 @@ sftool -p COM36 -c SF32LB52 -m nor write_flash --verify ^
 | `epd_waveform.bin` | `0x12EC0000` | E0470A03 屏幕波形 |
 | `update_state.bin` | `0x12F00000` | 初始升级状态记录 |
 
-`sftool_factory.json` 是同一镜像组的机器可读清单；`images.json` 含各 BIN 的实际长度、地址、CRC32 和 SHA-256。脚本 `flash_factory.bat` 和清单都属于首刷包的一部分。
+`sftool_param.json` 是 SDK `sftool config` 可直接读取的 JSON 清单。`ImgBurnList.ini` 使用 SDK 串口下载工具的 `[FILEINFO]` 格式，列出相同的七个 BIN、地址和数量；将整个包目录作为工具工作目录，使相对文件名能找到同目录镜像。`images.json` 含各 BIN 的实际长度、地址、CRC32 和 SHA-256。
 
 ## 故障处理
 

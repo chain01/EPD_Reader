@@ -53,14 +53,19 @@ def main():
             sha256=hashlib.sha256(metadata).hexdigest(),crc32=zlib.crc32(metadata)))
         manifest = dict(chip='SF32LB52', memory='NOR', write_flash=dict(verify=True,
                         files=[dict(path=i['path'], address=i['address']) for i in images]))
-        (args.output / 'sftool_factory.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        (args.output / 'sftool_param.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        ini_lines = ['[FILEINFO]']
+        for index, image in enumerate(images):
+            ini_lines.extend((f"FILE{index}={image['path']}", f"ADDR{index}={image['address']}"))
+        ini_lines.append(f'NUM={len(images)}')
+        (args.output / 'ImgBurnList.ini').write_text('\n'.join(ini_lines) + '\n', encoding='utf-8')
     (args.output / 'images.json').write_text(json.dumps(images, indent=2) + '\n', encoding='utf-8')
     if args.factory:
         (args.output / 'README.txt').write_text(
             'SF32LB527 / E0470A03-AF-S, 684x1216 portrait\n'
             'FACTORY SERIAL INSTALL PACKAGE for blank Flash or deliberate full recovery.\n'
             'Read FACTORY_FIRST_FLASH.md before use; do not use this package for routine updates.\n'
-            'Run flash_factory.bat COMx. sftool_factory.json lists the exact image addresses.\n'
+            'Run flash_factory.bat COMx. sftool_param.json and ImgBurnList.ini are included.\n'
             'images.json records every firmware image length, address, CRC32 and SHA-256.\n'
             'After installation, use the protected USB updater for routine firmware updates.\n', encoding='utf-8')
         (args.output / 'flash_factory.bat').write_text(
