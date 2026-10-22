@@ -4,7 +4,11 @@
  */
 #include <rtthread.h>
 #include <rtdevice.h>
+#ifndef READER527_RECOVERY_DISPLAY
 #include <finsh.h>
+#else
+#define MSH_CMD_EXPORT(name,description)
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include "board.h"
@@ -19,6 +23,10 @@
 #include "frontlight.h"
 #include "tf_card.h"
 #include "epub_mem.h"
+#ifdef READER527_RECOVERY_DISPLAY
+/* Recovery must work even while the application waveform partition is torn. */
+extern const uint8_t reader_recovery_wave[WAVE_BYTES];
+#endif
 
 #define W 1216
 #define H 684
@@ -121,7 +129,11 @@ void waveform_bin_reader_free(void *p) { rt_free(p); }
 int waveform_bin_reader_read_data(uint32_t off, uint8_t *buf, uint32_t size)
 {
     if (off > WAVE_BYTES || size > WAVE_BYTES - off) return -1;
+#ifdef READER527_RECOVERY_DISPLAY
+    memcpy(buf,reader_recovery_wave+off,size);return size;
+#else
     return rt_flash_read(CUSTOM_EPD_WAVE_TABLE_START_ADDR + off, buf, size);
+#endif
 }
 
 static int setup_lcd(void)
@@ -737,7 +749,12 @@ finish:
 }
 int board527_display_init(void)
 {
-    uint32_t hash=2166136261u;const uint8_t *wave=(const uint8_t *)CUSTOM_EPD_WAVE_TABLE_START_ADDR;
+    uint32_t hash=2166136261u;
+#ifdef READER527_RECOVERY_DISPLAY
+    const uint8_t *wave=reader_recovery_wave;
+#else
+    const uint8_t *wave=(const uint8_t *)CUSTOM_EPD_WAVE_TABLE_START_ADDR;
+#endif
     HAL_DBG_DWT_Init();rt_mutex_init(&lock,"epd527",RT_IPC_FLAG_PRIO);
     rt_timer_init(&cutoff,"epdlimit",power_cutoff,RT_NULL,rt_tick_from_millisecond(8000),RT_TIMER_FLAG_ONE_SHOT);
     idle();

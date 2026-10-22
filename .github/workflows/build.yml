@@ -57,6 +57,7 @@ jobs:
         python3 tools/test_527_tf_power.py
         python3 tools/test_527_dfu.py
         python3 tools/test_527_boot_key.py
+        python3 tools/test_527_recovery_screen.py
         python3 tools/test_527_dfu_package.py
         
     - name: Build ${{ matrix.target }}

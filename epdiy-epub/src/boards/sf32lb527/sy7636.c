@@ -5,7 +5,11 @@
  */
 #include <rtthread.h>
 #include <rtdevice.h>
+#ifndef READER527_RECOVERY_DISPLAY
 #include <finsh.h>
+#else
+#define MSH_CMD_EXPORT(name,description)
+#endif
 #include "board.h"
 #include "epd_tps.h" /* Existing panel API names retained. */
 #include "board527.h"
