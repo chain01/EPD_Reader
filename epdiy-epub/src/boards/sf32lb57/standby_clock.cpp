@@ -88,10 +88,10 @@ int reader57_standby_ram(Renderer *r,bool test)
         stop_rtc();if(key_seen)break;
         if(!rtc_seen||!read_time(minute,second)){rc=-RT_EIO;break;}
         if(test)minute=(shown+1)%1440;
-        bool full=partials>=10;draw_time(r,minute);uint32_t start=rt_tick_get_millisecond();
+        bool full=partials>=10;draw_time(r,minute);uint32_t start=test?rt_tick_get_millisecond():0;
         rc=board57_clock_present(board57_framebuffer(),full);if(rc)break;
         shown=minute;partials=full?0:partials+1;++updates;
-        rt_kprintf("CLOCK57_TICK kind=%s count=%u ms=%u\n",full?"FULL":"PARTIAL",updates,rt_tick_get_millisecond()-start);
+        if(test)rt_kprintf("CLOCK57_TICK kind=%s count=%u ms=%u\n",full?"FULL":"PARTIAL",updates,rt_tick_get_millisecond()-start);
     }
 done:
     stop_rtc();if(active){active=false;HAL_RTC_RegCallback(&RTC_Handler,saved_callback);}

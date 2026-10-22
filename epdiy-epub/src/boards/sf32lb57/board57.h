@@ -5,7 +5,7 @@ extern "C" {
 #endif
 int board57_init(void);
 int board57_display_init(void);
-int board57_display_present(const uint8_t *frame,int reading_page);
+int board57_display_present(const uint8_t *frame);
 int board57_clock_present(const uint8_t *frame,int full);
 int board57_display_prepare(const uint8_t *frame,int (*cancel)(void *),void *context);
 void board57_display_cancel_prepare(void);

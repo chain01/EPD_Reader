@@ -13,10 +13,8 @@
 #include "epd_tps.h"
 #include "mem_section.h"
 #include "epd_waveform.h"
-#include "epd_ink.h"
 #include "epd_power_status.h"
 #include "system_bf0_ap.h"
-#include <stdlib.h>
 
 /**
   * @brief epd_opm060da chip IDs
@@ -26,10 +24,6 @@
 #define  DBG_LEVEL            DBG_ERROR  //DBG_LOG //
 #define LOG_TAG                "epd_e0470a03_57"
 #include "log.h"
-/* Measurement build: no recurring serial output in the panel driver. */
-#ifndef EPD_POWER_DIAGNOSTICS
-#define rt_kprintf(...) ((void)0)
-#endif
 enum EpdRotation
 {
     EPD_ROT_LANDSCAPE = 0,
@@ -105,9 +99,7 @@ static const LCDC_InitTypeDef lcdc_int_cfg_edp_16bit =
 
 static LCDC_InitTypeDef lcdc_int_cfg;
 static rt_bool_t panel_power_ready;
-static LCDC_HandleTypeDef *panel_handle;
 static volatile rt_bool_t drawing;
-int epd_driver_is_busy(void) { return drawing; }
 static void  LCD_WriteReg(LCDC_HandleTypeDef *hlcdc, uint16_t LCD_Reg, uint8_t *Parameters, uint32_t NbParameters);
 static uint32_t LCD_ReadData(LCDC_HandleTypeDef *hlcdc, uint16_t RegValue, uint8_t ReadSize);
 
@@ -128,7 +120,6 @@ static uint32_t LCD_ReadData(LCDC_HandleTypeDef *hlcdc, uint16_t RegValue, uint8
 static void LCD_Init(LCDC_HandleTypeDef *hlcdc)
 {
     uint8_t parameter[32];
-    panel_handle = hlcdc;
 
     memcpy(&lcdc_int_cfg, &lcdc_int_cfg_edp_16bit, sizeof(lcdc_int_cfg));
     memcpy(&hlcdc->Init, &lcdc_int_cfg, sizeof(LCDC_InitTypeDef));
@@ -234,7 +225,7 @@ L1_RET_CODE_SECT(epd_codes, static void CopyToMixedGrayBuffer(LCDC_HandleTypeDef
     RT_ASSERT(LCD_HOR_RES_MAX == (Xpos1 - Xpos0 + 1));
     RT_ASSERT(LCD_VER_RES_MAX == (Ypos1 - Ypos0 + 1));
 
-    rt_kprintf("[EPD] flush: %s, src=%dx%d\n",
+    LOG_D("[EPD] flush: %s, src=%dx%d\n",
                display_rotation == EPD_ROT_INVERTED_PORTRAIT ? "PORTRAIT(rot)" :
                display_rotation == EPD_ROT_LANDSCAPE ? "LANDSCAPE" :
                display_rotation == EPD_ROT_PORTRAIT ? "PORTRAIT" : "INV_LANDSCAPE",
@@ -399,7 +390,6 @@ L1_RET_CODE_SECT(epd_codes, static void CopyToMixedGrayBuffer(LCDC_HandleTypeDef
 
 
 static void (* Ori_XferCpltCallback)(struct __LCDC_HandleTypeDef *lcdc);
-static uint32_t start_tick;
 static uint32_t total_frames; //Total frames need to do
 static uint32_t curr_frame; //Current flushing frame index
 static HAL_LCDC_PixelFormat ori_format;
@@ -407,231 +397,17 @@ static uint32_t lut[HAL_LCDC_LOOKUP_TABLE_SIZE >> 2];
 static volatile uint32_t completed_draws;
 static volatile uint32_t completed_frames;
 static volatile uint32_t transfer_errors;
-static uint32_t pad_high0, pad_high1, pad_low0, pad_low1;
-static unsigned int ink_drive_frames;
-static int ink_vendor_checked;
-static rt_bool_t ink_drawing;
-static rt_bool_t ink_region_valid, ink_previous_valid;
-static rt_bool_t ink_all_white;
-static LCDC_AreaDef ink_area, ink_previous;
-static EpdInkStats ink_stats;
-static uint32_t ink_start_cycles, ink_wave_cycles;
-
-static uint32_t ink_elapsed_us(uint32_t start)
-{
-    return (HAL_DBG_DWT_GetCycles() - start) / (HAL_RCC_GetHCLKFreq(CORE_ID_HCPU) / 1000000);
-}
-
-int epd_ink_configure(unsigned int frames)
-{
-    unsigned int i;
-    if (drawing || frames > 18) return -RT_EBUSY;
-    if (frames && !ink_vendor_checked)
-    {
-        if (epd_ink_vendor_check()) return -RT_ERROR;
-        ink_vendor_checked = 1;
-    }
-    if (frames && !ink_drive_frames)
-    {
-        /* Discard old transition codes once at session start. Keep the exact
-         * displayed binary state; untouched pixels must never receive pulses. */
-        ink_all_white=RT_TRUE;
-        for (i=0; i<sizeof(mixed_framebuffer); i++)
-        {
-            unsigned int value=mixed_framebuffer[i] & 15;
-            if (value != 0 && value != 15)
-                return -RT_EINVAL;
-            if (value!=15) ink_all_white=RT_FALSE;
-        }
-        for (i=0; i<sizeof(mixed_framebuffer); i++)
-        {
-            uint8_t value=mixed_framebuffer[i] & 15;
-            mixed_framebuffer[i]=value | (value << 4);
-        }
-        mpu_dcache_clean(mixed_framebuffer, sizeof(mixed_framebuffer));
-        ink_previous_valid=RT_FALSE;
-    }
-    ink_drive_frames=frames;
-    ink_region_valid=RT_FALSE;
-    return RT_EOK;
-}
-
-int epd_ink_region(unsigned int x, unsigned int y, unsigned int w, unsigned int h)
-{
-    if (!ink_drive_frames || drawing || !w || !h || x>=684 || y>=1216 ||
-        w>684-x || h>1216-y) return -RT_EINVAL;
-    /* EPDiy portrait rotation: native x=y, native y=683-x. TCON still scans
-     * the full panel; only preparation of modified pixels is bounded here. */
-    ink_area.x0=y & ~3u; ink_area.x1=(y+h-1) | 3u;
-    ink_area.y0=684-x-w; ink_area.y1=683-x;
-    ink_region_valid=RT_TRUE;
-    return RT_EOK;
-}
-
-const EpdInkStats *epd_ink_stats(void) { return &ink_stats; }
-int epd_ink_power_ready(void) { return panel_power_ready; }
-
-static void ink_gate_idle(void)
-{
-    HAL_PIN_Set(PAD_PA26, GPIO_A26, PIN_NOPULL, 1);
-    BSP_GPIO_Set(26, 0, 1);
-    BSP_LCD_GMODE_Set(0);
-}
-
-static void ink_gate_resume(void)
-{
-    GPIO_InitTypeDef cfg={.Pin=26, .Mode=GPIO_MODE_INPUT, .Pull=GPIO_NOPULL};
-    HAL_GPIO_Init(hwp_gpio1, &cfg);
-    HAL_PIN_Set(PAD_PA26, LCDC1_TCON_SDOE, PIN_NOPULL, 1);
-}
-
-static void ink_clean_area(const LCDC_AreaDef *area)
-{
-    unsigned int y;
-    uint32_t span=(area->y1-area->y0)*EPD_PANEL_HOR+area->x1-area->x0+1;
-    if (span > 4096)
-        mpu_dcache_clean(mixed_framebuffer,sizeof(mixed_framebuffer));
-    else
-        for(y=area->y0;y<=area->y1;y++)
-            mpu_dcache_clean(&mixed_framebuffer[y*EPD_PANEL_HOR+area->x0],area->x1-area->x0+1);
-}
-
-static inline uint32_t ink_unpack4(uint16_t packed)
-{
-    return (packed & 15u) | ((packed & 0xf0u) << 4) |
-           ((packed & 0xf00u) << 8) | ((packed & 0xf000u) << 12);
-}
-
-L1_RET_CODE_SECT(epd_ink_prepare, static int ink_prepare_pixels(const uint8_t *src))
-{
-    unsigned int x,y;
-    if (!ink_region_valid) return -RT_EINVAL;
-    /* Exact all-white -> all-black has no per-pixel history ambiguity. Verify
-     * the supplied buffer, then write one transition code using bulk stores. */
-    if (ink_all_white && !ink_area.x0 && !ink_area.y0 &&
-        ink_area.x1==EPD_PANEL_HOR-1 && ink_area.y1==EPD_PANEL_VER-1)
-    {
-        unsigned int i;
-        for(i=0;i<sizeof(mixed_framebuffer)/2;i++) if(src[i]) break;
-        if(i==sizeof(mixed_framebuffer)/2)
-        {
-            memset(mixed_framebuffer,0xf0,sizeof(mixed_framebuffer));
-            ink_stats.changed_pixels=sizeof(mixed_framebuffer);
-            ink_clean_area(&ink_area);
-            ink_previous=ink_area;ink_previous_valid=RT_TRUE;ink_region_valid=RT_FALSE;
-            ink_all_white=RT_FALSE;
-            return RT_EOK;
-        }
-    }
-    /* First validate the requested region, without corrupting displayed-state
-     * history when an erase or grayscale transition is accidentally submitted. */
-    for (y=ink_area.y0; y<=ink_area.y1; y++)
-        for (x=ink_area.x0; x<=ink_area.x1; x+=4)
-        {
-            unsigned int pos=y*EPD_PANEL_HOR+x;
-            uint32_t next=ink_unpack4(*(const uint16_t *)&src[pos/2]);
-            uint32_t old=*(uint32_t *)&mixed_framebuffer[pos] & 0x0f0f0f0fu;
-            if (next!=(next&0x01010101u)*15u || ((~old)&next)) return -RT_EINVAL;
-        }
-    if (ink_previous_valid)
-        for (y=ink_previous.y0; y<=ink_previous.y1; y++)
-        {
-            for (x=ink_previous.x0; x<=ink_previous.x1; x+=4)
-            {
-                uint32_t *pixel=(uint32_t *)&mixed_framebuffer[y*EPD_PANEL_HOR+x];
-                uint32_t value=*pixel & 0x0f0f0f0fu;
-                *pixel=value | (value << 4);
-            }
-        }
-    for (y=ink_area.y0; y<=ink_area.y1; y++)
-    {
-        for (x=ink_area.x0; x<=ink_area.x1; x+=4)
-        {
-            unsigned int pos=y*EPD_PANEL_HOR+x;
-            uint32_t next=ink_unpack4(*(const uint16_t *)&src[pos/2]);
-            uint32_t old=*(uint32_t *)&mixed_framebuffer[pos] & 0x0f0f0f0fu;
-            uint32_t changes=(old&~next)&0x01010101u;
-            *(uint32_t *)&mixed_framebuffer[pos]=(old << 4) | next;
-            ink_stats.changed_pixels += (changes*0x01010101u)>>24;
-        }
-    }
-    if (ink_previous_valid) ink_clean_area(&ink_previous);
-    ink_clean_area(&ink_area);
-    ink_previous=ink_area; ink_previous_valid=RT_TRUE; ink_region_valid=RT_FALSE;
-    if(ink_stats.changed_pixels) ink_all_white=RT_FALSE;
-    return RT_EOK;
-}
-static rt_bool_t trace_armed;
-static uint32_t trace_count;
-static struct { uint32_t cycles, low, high; } trace_edges[192];
-
-static int epd_trace(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    trace_armed = RT_TRUE;
-    rt_kprintf("EPD_TRACE_ARMED next refresh, MCU PAD sampling\n");
-    return 0;
-}
-MSH_CMD_EXPORT(epd_trace, Capture control edges on next refresh);
-
-static void capture_control_edges(void)
-{
-    uint32_t last0=0xffffffff, last1=0xffffffff;
-    uint32_t start=HAL_DBG_DWT_GetCycles();
-    uint32_t budget=HAL_RCC_GetHCLKFreq(CORE_ID_HCPU)/1000;
-    rt_base_t irq=rt_hw_interrupt_disable();
-    trace_count=0;
-    do
-    {
-        uint32_t low=hwp_gpio1->DIR & 0x0e000000;
-        uint32_t high=(hwp_gpio1+1)->DIR & 0x00000380;
-        if (low!=last0 || high!=last1)
-        {
-            trace_edges[trace_count].cycles=HAL_DBG_DWT_GetCycles()-start;
-            trace_edges[trace_count].low=low;
-            trace_edges[trace_count].high=high;
-            trace_count++;
-            last0=low; last1=high;
-        }
-    } while (trace_count<192 && HAL_DBG_DWT_GetCycles()-start<budget);
-    rt_hw_interrupt_enable(irq);
-    trace_armed=RT_FALSE;
-}
-
-static void sample_panel_outputs(void)
-{
-#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
-    uint32_t hi0 = 0, hi1 = 0, lo0 = 0, lo1 = 0;
-    unsigned int i;
-    for (i = 0; i < 12000; i++)
-    {
-        uint32_t a = hwp_gpio1->DIR;
-        uint32_t b = (hwp_gpio1 + 1)->DIR;
-        hi0 |= a; lo0 |= ~a;
-        hi1 |= b; lo1 |= ~b;
-    }
-    rt_kprintf("EPD_PAD hi=%08x:%08x lo=%08x:%08x toggles=%08x:%08x\n",
-               hi1, hi0, lo1, lo0, hi1 & lo1, hi0 & lo0);
-#endif
-}
-
-/*
-*/
 static uint32_t StartFrame(LCDC_HandleTypeDef *hlcdc, uint32_t frame_idx)
 {
     if (frame_idx < total_frames)
     {
-        if (ink_drawing)
-            lut[0xf0]=0xff000000u | (frame_idx < ink_drive_frames ? 1u : 0u);
-        else
-            epd_wave_table_fill_lut((uint32_t *)&lut[0], frame_idx);
+        epd_wave_table_fill_lut((uint32_t *)&lut[0], frame_idx);
         BSP_LCD_GMODE_Set(0);
         HAL_Delay_us(1);
         BSP_LCD_GMODE_Set(1);
         if (HAL_LCDC_SendLayerData_IT(hlcdc) != HAL_OK)
         {
             transfer_errors++;
-            if (ink_drawing) ink_stats.result=-RT_ERROR;
             LOG_E("EPD frame start failed at %u", frame_idx);
             return 1;
         }
@@ -649,15 +425,6 @@ static void LCDC_SendLineCpltCbk(LCDC_HandleTypeDef *hlcdc)
 
     if (StartFrame(hlcdc, curr_frame++))
     {
-        if (ink_drawing)
-        {
-            ink_stats.wave_us=ink_elapsed_us(ink_wave_cycles);
-            ink_gate_idle();
-            ink_stats.driver_us=ink_elapsed_us(ink_start_cycles);
-            ink_drawing=RT_FALSE;
-        }
-
-
         HAL_LCDC_LayerSetFormat(hlcdc, HAL_LCDC_LAYER_DEFAULT, ori_format); //Restore layer format
         drawing = RT_FALSE;
         completed_draws++;
@@ -669,52 +436,12 @@ static void LCDC_SendLineCpltCbk(LCDC_HandleTypeDef *hlcdc)
 
 static void LCD_WriteMultiplePixels(LCDC_HandleTypeDef *hlcdc, const uint8_t *RGBCode, uint16_t Xpos0, uint16_t Ypos0, uint16_t Xpos1, uint16_t Ypos1)
 {
-    if (ink_drive_frames)
-    {
-        unsigned int i;
-        ink_start_cycles=HAL_DBG_DWT_GetCycles();
-        memset(&ink_stats,0,sizeof(ink_stats));
-        ink_stats.drive_frames=ink_drive_frames;
-        ink_stats.result = !panel_power_ready ? -RT_ERROR :
-            (hlcdc->Layer[HAL_LCDC_LAYER_DEFAULT].data_format != LCDC_PIXEL_FORMAT_A4 ?
-             -RT_EINVAL : ink_prepare_pixels(RGBCode));
-        if (ink_stats.result || !ink_stats.changed_pixels)
-        {
-            ink_region_valid=RT_FALSE;
-            ink_stats.driver_us=ink_elapsed_us(ink_start_cycles);
-            if (hlcdc->XferCpltCallback) hlcdc->XferCpltCallback(hlcdc);
-            return;
-        }
-        ink_stats.prepare_us=ink_elapsed_us(ink_start_cycles);
-        ori_format=hlcdc->Layer[HAL_LCDC_LAYER_DEFAULT].data_format;
-        HAL_LCDC_LayerSetData(hlcdc, HAL_LCDC_LAYER_DEFAULT, mixed_framebuffer,0,0,EPD_PANEL_HOR-1,EPD_PANEL_VER-1);
-        HAL_LCDC_LayerSetFormat(hlcdc,HAL_LCDC_LAYER_DEFAULT,LCDC_PIXEL_FORMAT_L8);
-        for(i=0;i<256;i++) lut[i]=0xff000000u;
-        HAL_LCDC_LayerSetLTab(hlcdc,HAL_LCDC_LAYER_DEFAULT,(LCDC_AColorDef *)lut);
-        total_frames=ink_drive_frames+1; ink_stats.total_frames=total_frames; curr_frame=1;
-        Ori_XferCpltCallback=hlcdc->XferCpltCallback;
-        hlcdc->XferCpltCallback=LCDC_SendLineCpltCbk;
-        ink_drawing=drawing=RT_TRUE;
-        ink_gate_resume();
-        ink_wave_cycles=HAL_DBG_DWT_GetCycles();
-        if (StartFrame(hlcdc,0))
-        {
-            ink_gate_idle(); ink_drawing=drawing=RT_FALSE;
-            HAL_LCDC_LayerSetFormat(hlcdc,HAL_LCDC_LAYER_DEFAULT,ori_format);
-            hlcdc->XferCpltCallback=Ori_XferCpltCallback;
-            if(Ori_XferCpltCallback) Ori_XferCpltCallback(hlcdc);
-            Ori_XferCpltCallback=NULL;
-        }
-        return;
-    }
     if (!panel_power_ready)
     {
         LOG_E("EPD draw skipped: panel power is not ready");
         if (hlcdc->XferCpltCallback) hlcdc->XferCpltCallback(hlcdc);
         return;
     }
-    start_tick = rt_tick_get();
-    pad_high0=pad_high1=pad_low0=pad_low1=0;
     ori_format = hlcdc->Layer[HAL_LCDC_LAYER_DEFAULT].data_format;
 
     LOG_I("LCD_WriteMultiplePixels %d pixels to %d, %d", (Xpos1 - Xpos0) * (Ypos1 - Ypos0), Xpos0, Ypos0);
@@ -727,7 +454,7 @@ static void LCD_WriteMultiplePixels(LCDC_HandleTypeDef *hlcdc, const uint8_t *RG
     HAL_LCDC_LayerSetLTab(hlcdc, HAL_LCDC_LAYER_DEFAULT, (LCDC_AColorDef *)lut);
 
 
-    total_frames = epd_wave_table_get_frames(26, EPD_DRAW_MODE_AUTO);
+    total_frames = epd_wave_table_get_frames();
     curr_frame = 1; /* Frame zero is started below, once. */
     LOG_I("Done. Start to flush total_frames = %d", total_frames);
 
@@ -751,54 +478,8 @@ static void LCD_WriteMultiplePixels(LCDC_HandleTypeDef *hlcdc, const uint8_t *RG
         Ori_XferCpltCallback = NULL;
         return;
     }
-    /* No GPIO sampling/busy-loop instrumentation in a power workload. */
 }
 
-static int epd_status(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    rt_kprintf("EPD_STATUS draws=%u frames=%u errors=%u busy=%d power_ready=%d\n",
-               completed_draws, completed_frames, transfer_errors, drawing, panel_power_ready);
-    return transfer_errors ? -RT_ERROR : RT_EOK;
-}
-MSH_CMD_EXPORT(epd_status, EPD completed refresh and frame counters);
-
-static int epd_timing(int argc, char **argv)
-{
-    LCDC_HandleTypeDef *h = panel_handle;
-    if (!h || drawing) return -RT_EBUSY;
-    if (argc == 5)
-    {
-        int smode = atoi(argv[1]), lsl = atoi(argv[2]);
-        int lbl = atoi(argv[3]), lel = atoi(argv[4]);
-        if (smode < 0 || smode > 1 || lsl < 8 || lsl > 32 ||
-            lbl < 20 || lbl > 64 || lel < 10 || lel > 32)
-            return -RT_EINVAL;
-        h->Init.cfg.epd.SDMODE = smode;
-        h->Init.cfg.epd.LSL = lsl;
-        h->Init.cfg.epd.LBL = lbl;
-        h->Init.cfg.epd.LEL = lel;
-        MODIFY_REG(h->Instance->TCON_IF_CONF1, LCD_IF_TCON_IF_CONF1_SMODE_Msk,
-                   smode << LCD_IF_TCON_IF_CONF1_SMODE_Pos);
-        h->Instance->TCON_IF_CONF2 = (h->Init.cfg.epd.GSTA << 24) | (lel << 16) | (lbl << 8) | lsl;
-    }
-    rt_kprintf("EPD_TIMING smode=%u lsl=%u lbl=%u lel=%u conf1=%08x conf2=%08x conf3=%08x conf4=%08x\n",
-               h->Init.cfg.epd.SDMODE, h->Init.cfg.epd.LSL, h->Init.cfg.epd.LBL, h->Init.cfg.epd.LEL,
-               h->Instance->TCON_IF_CONF1, h->Instance->TCON_IF_CONF2,
-               h->Instance->TCON_IF_CONF3, h->Instance->TCON_IF_CONF4);
-    rt_kprintf("EPD_CONV lcd=%08x conv=%08x flex=%08x grey=%08x source=%08x\n",
-               h->Instance->LCD_CONF, h->Instance->CONV_CFG, h->Instance->FLEX_SEL_H,
-               h->Instance->GREY_CONV, h->Instance->LAYER0_SRC);
-    return RT_EOK;
-}
-MSH_CMD_EXPORT(epd_timing, Show or set EPD timing: smode lsl lbl lel);
-
-
-/**
-  * @brief  Writes  to the selected LCD register.
-  * @param  LCD_Reg: address of the selected register.
-  * @retval None
-  */
 static void LCD_WriteReg(LCDC_HandleTypeDef *hlcdc, uint16_t LCD_Reg, uint8_t *Parameters, uint32_t NbParameters)
 {
     HAL_LCDC_WriteU8Reg(hlcdc, LCD_Reg, Parameters, NbParameters);
@@ -851,14 +532,7 @@ static void IdleModeOn(LCDC_HandleTypeDef *hlcdc)
     BSP_EPD_BusIdle();
 #endif
     panel_power_ready = RT_FALSE;
-    if (trace_count)
-    {
-        unsigned int i;
-        rt_kprintf("EPD_TRACE hz=%u edges=%u\n", HAL_RCC_GetHCLKFreq(CORE_ID_HCPU), trace_count);
-        for (i=0; i<trace_count; i++)
-            rt_kprintf("EDGE %u %08x %08x\n", trace_edges[i].cycles, trace_edges[i].low, trace_edges[i].high);
-        trace_count=0;
-    }
+
 }
 
 static void IdleModeOff(LCDC_HandleTypeDef *hlcdc)

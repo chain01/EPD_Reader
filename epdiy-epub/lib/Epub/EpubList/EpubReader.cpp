@@ -296,12 +296,16 @@ bool EpubReader::prepare_next_page(int (*cancel)(void *),void *context)
     update_page_count();
     int next=state.current_page+1;
     if(next>=state.pages_in_current_section||!renderer->begin_page_preview())return false;
+#ifdef READER_PAGE_DIAGNOSTICS
     uint32_t start=rt_tick_get();
+#endif
     if(!parser->render_text_preview(next,renderer,epub,cancel,context)) {
         renderer->cancel_page_preview();return false;
     }
     render_progress(next);
+#ifdef READER_PAGE_DIAGNOSTICS
     rt_kprintf("READER_PREVIEW section=%u page=%d draw_ms=%u\n",state.current_section,next,rt_tick_get()-start);
+#endif
     // Caller adds status bar before asking the panel driver to prepare the wave.
     return true;
 }

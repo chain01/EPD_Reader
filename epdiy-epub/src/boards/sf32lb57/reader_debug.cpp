@@ -21,7 +21,7 @@ bool reader57_debug_message(uint32_t message,Renderer *r)
 {
     if(message<HOME||message>AUTO20)return false;
     if(message==CLOCK||message==CLOCK_TEST){reader57_standby_ram(r,message==CLOCK_TEST);reader57_standby_ram_take_restored();return true;}
-    if(message>=AUTO_OFF){const unsigned seconds[]={0,10,15,20};bool ok=reading_auto_turn_set(seconds[message-AUTO_OFF]);rt_kprintf("AUTO57 seconds=%u rc=%d\n",reading_auto_turn_seconds(),ok?0:-1);return true;}
+    if(message>=AUTO_OFF&&message<=AUTO20){const unsigned seconds[]={0,10,15,20};bool ok=reading_auto_turn_set(seconds[message-AUTO_OFF]);rt_kprintf("AUTO57 seconds=%u rc=%d\n",reading_auto_turn_seconds(),ok?0:-1);return true;}
     if(message==DFU_ENTER){if(ui_state==USB_DFU_PAGE){reader_dfu_hit=0;handleUserInteraction(r,SELECT,false);}return true;}
     r->cancel_page_preview();
     if(message==HOME)ui_state=MAIN_PAGE;

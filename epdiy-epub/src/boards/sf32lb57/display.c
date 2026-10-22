@@ -13,8 +13,10 @@ L2_NON_RET_BSS_SECT(reader57_fb,ALIGN(64) static uint8_t frame[1216*684/2]);
 L2_NON_RET_BSS_SECT_END
 static rt_device_t lcd;
 static unsigned updates_since_clean,period=10;
-static int previous_reading_page;
+static int displayed;
 static int known;
+static int last_mode;
+static uint32_t last_ms;
 uint8_t *board57_framebuffer(void){return frame;}
 void set_part_disp_times(int value){period=value>0?(unsigned)value:0;}
 static int wait_lcd(void)
@@ -36,10 +38,10 @@ void board57_display_off(void){if(lcd)(void)power_mode(1);}
 static int present(const uint8_t *data,int mode)
 {
     epd_power_status_t before,after;uint8_t error=0;
+    if(epd_wave_prepare_mode(mode)){board57_display_off();return -RT_ERROR;}
     epd_get_power_status(&before);uint32_t start=rt_tick_get_millisecond();
     int rc=power_mode(0);epd_get_power_status(&after);
     if(rc||!after.power_ready){board57_display_off();return -RT_ERROR;}
-    epd_wave_set_mode(mode);
     rt_graphix_ops(lcd)->set_window(0,0,1215,683);
     rt_graphix_ops(lcd)->draw_rect((const char *)data,0,0,1215,683);
     rc=wait_lcd();epd_get_power_status(&after);
@@ -48,7 +50,7 @@ static int present(const uint8_t *data,int mode)
         !epd_wave_last_frames()||after.frames-before.frames!=epd_wave_last_frames())rc=-RT_ERROR;
     if(power_mode(1))rc=-RT_ERROR;
     if(rt_pin_read(42)||rt_pin_read(43)||rt_pin_read(44))rc=-RT_ERROR;
-    rt_kprintf("EPD57_REFRESH mode=%d frames=%u ms=%u rc=%d\n",mode,after.frames-before.frames,rt_tick_get_millisecond()-start,rc);
+    last_mode=mode;last_ms=rt_tick_get_millisecond()-start;
     return rc;
 }
 int board57_display_init(void)
@@ -61,16 +63,15 @@ int board57_display_init(void)
     memset(frame,0xff,sizeof(frame));
     int rc=present(frame,3);known=!rc;return rc;
 }
-int board57_display_present(const uint8_t *data,int reading_page)
+int board57_display_present(const uint8_t *data)
 {
     if(!known)return -RT_ERROR;
-    /* GL16 is reserved for consecutive reading pages. Menus change their
-     * layout substantially and must erase the previous controls immediately.
-     * Also clean once when returning from a menu to the book. */
-    int full=!reading_page||!previous_reading_page||!period||updates_since_clean>=period-1;
-    int rc=present(data,full?0:5);
-    if(!rc){updates_since_clean=full?0:updates_since_clean+1;previous_reading_page=reading_page;}
-    else previous_reading_page=0;
+    /* Reading and menus share the calibrated B/W erase. Native gray
+     * transitions and the configured periodic GC16 clean remain intact. */
+    int full=!displayed||!period||updates_since_clean>=period-1;
+    int rc=present(data,full?0:EPD_WAVE_TEXT);
+    if(!rc){updates_since_clean=full?0:updates_since_clean+1;displayed=1;}
+    else displayed=0;
     return rc;
 }
 int board57_clock_present(const uint8_t *data,int full){return known?present(data,full?0:1):-RT_ERROR;}
@@ -79,3 +80,18 @@ int board57_display_prepare(const uint8_t *data,int (*cancel)(void *),void *cont
     (void)data;return cancel&&cancel(context)?-RT_EINTR:0;
 }
 void board57_display_cancel_prepare(void){}
+
+#ifdef RT_USING_FINSH
+#include <finsh.h>
+static int display57(int argc,char **argv)
+{
+    epd_power_status_t status;
+    (void)argv;
+    if(argc!=1)return -RT_EINVAL;
+    epd_get_power_status(&status);
+    rt_kprintf("EPD57_STATUS mode=%d last_ms=%u draws=%u frames=%u errors=%u busy=%d power_ready=%d\n",
+        last_mode,last_ms,status.draws,status.frames,status.errors,status.busy,status.power_ready);
+    return 0;
+}
+MSH_CMD_EXPORT(display57, EPD status on request);
+#endif
