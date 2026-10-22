@@ -1,5 +1,9 @@
 #pragma once
 #include "EpdiyFrameBufferRenderer.h"
+#include "EpubList/EpubReader.h"
+#include "type.h"
+extern AppUIState ui_state;
+extern EpubReader *reader;
 extern "C" {
 #include "board57.h"
 }
@@ -21,7 +25,8 @@ public:
     void flush_display() override
     {
         if(preview_frame)return;
-        int rc=board57_display_present(m_frame_buffer);
+        bool reading_page=ui_state==READING_EPUB&&reader&&!reader->is_overlay_active();
+        int rc=board57_display_present(m_frame_buffer,reading_page);
         if(rc)rt_kprintf("READER_DISPLAY_ERROR rc=%d\n",rc);
     }
     bool begin_page_preview() override

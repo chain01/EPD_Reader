@@ -12,7 +12,8 @@ L2_NON_RET_BSS_SECT_BEGIN(reader57_fb)
 L2_NON_RET_BSS_SECT(reader57_fb,ALIGN(64) static uint8_t frame[1216*684/2]);
 L2_NON_RET_BSS_SECT_END
 static rt_device_t lcd;
-static unsigned refreshes,period=10;
+static unsigned updates_since_clean,period=10;
+static int previous_reading_page;
 static int known;
 uint8_t *board57_framebuffer(void){return frame;}
 void set_part_disp_times(int value){period=value>0?(unsigned)value:0;}
@@ -60,11 +61,17 @@ int board57_display_init(void)
     memset(frame,0xff,sizeof(frame));
     int rc=present(frame,3);known=!rc;return rc;
 }
-int board57_display_present(const uint8_t *data)
+int board57_display_present(const uint8_t *data,int reading_page)
 {
     if(!known)return -RT_ERROR;
-    int full=!refreshes||!period||refreshes%period==0;
-    int rc=present(data,full?0:5);if(!rc)++refreshes;return rc;
+    /* GL16 is reserved for consecutive reading pages. Menus change their
+     * layout substantially and must erase the previous controls immediately.
+     * Also clean once when returning from a menu to the book. */
+    int full=!reading_page||!previous_reading_page||!period||updates_since_clean>=period-1;
+    int rc=present(data,full?0:5);
+    if(!rc){updates_since_clean=full?0:updates_since_clean+1;previous_reading_page=reading_page;}
+    else previous_reading_page=0;
+    return rc;
 }
 int board57_clock_present(const uint8_t *data,int full){return known?present(data,full?0:1):-RT_ERROR;}
 int board57_display_prepare(const uint8_t *data,int (*cancel)(void *),void *context)
