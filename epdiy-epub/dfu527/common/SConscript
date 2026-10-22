@@ -1,3 +1,4 @@
 from building import *
-group=DefineGroup('Reader527UpdateCore',Glob('*.c'),depend=[''],CPPPATH=[GetCurrentDir()])
+defines=['BSP_USING_BOARD_SF32LB57GY_OED_E0470A03'] if GetDepend('BSP_USING_BOARD_SF32LB57GY_OED_E0470A03') else []
+group=DefineGroup('ReaderUpdateCore',Glob('*.c'),depend=[''],CPPPATH=[GetCurrentDir()],CPPDEFINES=defines)
 Return('group')

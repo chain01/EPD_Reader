@@ -4,7 +4,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+#define R527_BOARD_ID 0x05700470u
+#else
 #define R527_BOARD_ID 0x05270470u
+#endif
 #define R527_LAYOUT_ID 1u
 #define R527_LOADER_BASE 0x12020000u
 #define R527_LOADER_SIZE 0x00180000u

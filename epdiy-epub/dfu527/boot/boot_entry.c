@@ -1,13 +1,16 @@
 /* SPDX-License-Identifier: Apache-2.0
- * Retain the pinned SF32LB52 silicon/Flash bring-up. Do not execute its generic
+ * Retain the pinned silicon-family Flash bring-up. Do not execute its generic
  * OTA selector: the immutable first stage dispatches only to fixed partitions.
  */
 #define entry sdk_unused_entry
 #define boot_images_help sdk_unused_boot_images_help
-#include "main.c" /* pinned SDK butterflmicro/board/main.c, via SConscript */
+#include "main.c" /* pinned SDK family board/main.c, selected by SConscript */
 #undef entry
 #undef boot_images_help
 #include "reader_dfu.h"
+#ifdef SF32LB57X
+extern void run_img(uint32_t dest);
+#endif
 
 static int read_nor(uint32_t address,void *data,uint32_t size)
 {return g_flash_read(address,(const int8_t *)data,size)==(int)size?0:-1;}
@@ -54,6 +57,12 @@ static void boot_reader(void)
 }
 int entry(void)
 {
+#ifdef SF32LB57X
+    sboot_init();
+    board_init();
+    board_boot_device=board_boot_from();
+    if(boot_device_init())boot_reader();
+#else
     HAL_Delay_us(0);
     if(__HAL_SYSCFG_GET_REVID()>=HAL_CHIP_REV_ID_A4) {
         board_flash_power_on();HAL_MspInit();board_boot_src=board_boot_from();
@@ -61,6 +70,7 @@ int entry(void)
         board_boot_src=board_boot_from();board_flash_power_on();HAL_MspInit();
     }
     __HAL_SYSCFG_CLEAR_SECURITY();dfu_flash_init();boot_reader();
+#endif
     /* Corrupt recovery vectors require factory reinstallation, never a jump
      * into unchecked application data. No erase/write primitive is used here. */
     while(1){};

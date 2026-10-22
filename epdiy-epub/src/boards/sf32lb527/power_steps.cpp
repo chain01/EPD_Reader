@@ -9,7 +9,7 @@ extern "C" {
 #include "board.h"
 #include "bf0_pm.h"
 }
-extern void reader527_close_book_for_power_test();
+extern void reader_close_book();
 extern int reader527_steps_quiet_start();
 
 static uint32_t original_pads[45],original_out[2],original_enable[2];
@@ -88,7 +88,7 @@ int reader527_power_steps(Renderer *r,unsigned seconds)
 {
     int rc=0;
     rt_kprintf("POWER_STEPS_PREPARE seconds=%u\n",seconds);
-    reader527_close_book_for_power_test();r->cancel_page_preview();board527_power_auto();
+    reader_close_book();r->cancel_page_preview();board527_power_auto();
     if(font_manager_select(0,28)){rc=-RT_ERROR;goto steps_finish;}
     if(board527_frontlight_set(0,0)||board527_amplifier_test(1)){rc=-RT_ERROR;goto steps_finish;}
     board527_touch_power(0);
@@ -141,7 +141,7 @@ int reader527_touch_states(Renderer *r,unsigned seconds)
 {
     int rc=0;
     rt_kprintf("TOUCH_STATES_PREPARE seconds=%u\n",seconds);
-    reader527_close_book_for_power_test();r->cancel_page_preview();board527_power_auto();
+    reader_close_book();r->cancel_page_preview();board527_power_auto();
     if(board_tf_present()!=0){rc=-RT_EBUSY;goto touch_finish;}
     if(font_manager_select(0,28)){rc=-RT_ERROR;goto touch_finish;}
     if(board527_frontlight_set(0,0)||board527_amplifier_test(1)){rc=-RT_ERROR;goto touch_finish;}

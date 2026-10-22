@@ -9,7 +9,7 @@ extern "C" {
 #include "drv_flash.h"
 #include "board.h"
 }
-extern void reader527_close_book_for_power_test();
+extern void reader_close_book();
 
 static int minimum_abort(const char *reason)
 {
@@ -24,7 +24,7 @@ static int minimum_abort(const char *reason)
  * File data and the protected USB loader are untouched; RAM is discarded. */
 int reader527_minimum_power(Renderer *r,bool timed_test)
 {
-    reader527_close_book_for_power_test();r->cancel_page_preview();
+    reader_close_book();r->cancel_page_preview();
     if(font_manager_select(0,28))return minimum_abort("builtin_font");
     clear_areas();r->clear_screen();
     r->draw_text(20,80,"MINIMUM POWER TEST R32");

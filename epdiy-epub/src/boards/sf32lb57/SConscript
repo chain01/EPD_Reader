@@ -1,0 +1,7 @@
+from building import *
+import os
+cwd=GetCurrentDir()
+group=DefineGroup('Reader57Drivers',Glob('*.c')+Glob('*.cpp'),depend=['BSP_USING_BOARD_SF32LB57GY_OED_E0470A03'],CPPPATH=[cwd,os.path.join(cwd,'panel'),os.path.join(cwd,'../../../waveform')])
+if GetDepend('BSP_USING_BOARD_SF32LB57GY_OED_E0470A03'):
+    group += SConscript('panel/SConscript')
+Return('group')

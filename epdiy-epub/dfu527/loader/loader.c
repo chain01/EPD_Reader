@@ -62,12 +62,18 @@ static void dispatch(void)
 }
 int main(void)
 {
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+    /* Discrete enables on 57: touch, TPS65185 and AW99703 remain off. */
+    static const uint8_t disabled[]={4,5,42,43,44,53,54,57};
+    for(unsigned i=0;i<sizeof(disabled);++i){rt_pin_mode(disabled[i],PIN_MODE_OUTPUT);rt_pin_write(disabled[i],0);}
+#else
     /* Hold all enables off until the one-time recovery notice is ready. */
     rt_pin_mode(3,PIN_MODE_OUTPUT);rt_pin_write(3,0);
 #ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
     extern int reader_recovery_screen(void);
     /* Display failure must not disable the independent USB recovery path. */
     reader_recovery_screen();
+#endif
 #endif
     HAL_PIN_Set_Analog(PAD_PA35,1);HAL_PIN_Set_Analog(PAD_PA36,1);
     rt_kprintf("DFU527_READY USB=CDC board=%08x protocol=1 protected=12000000..12200000\n",R527_BOARD_ID);

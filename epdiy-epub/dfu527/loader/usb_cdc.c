@@ -16,7 +16,11 @@ static const uint8_t config_desc[]={
     USB_CONFIG_DESCRIPTOR_INIT(9+CDC_ACM_DESCRIPTOR_LEN,2,1,USB_CONFIG_BUS_POWERED,100),
     CDC_ACM_DESCRIPTOR_INIT(0,INT_EP,OUT_EP,IN_EP,MPS,2)
 };
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+static const char *strings[]={(const char[]){9,4},"SiFli","EPD Reader 57 Recovery","EPD57-RECOVERY-1"};
+#else
 static const char *strings[]={(const char[]){9,4},"SiFli","EPD Reader 527 Recovery","EPD527-RECOVERY-1"};
+#endif
 static const uint8_t *device_cb(uint8_t speed){(void)speed;return device_desc;}
 static const uint8_t *config_cb(uint8_t speed){(void)speed;return config_desc;}
 static const char *string_cb(uint8_t speed,uint8_t index){(void)speed;return index<4?strings[index]:RT_NULL;}

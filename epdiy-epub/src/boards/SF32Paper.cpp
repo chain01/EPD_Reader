@@ -1,5 +1,5 @@
 #include <rtconfig.h>
-#if !defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
+#if !defined(READER_E0470A03)
 
 #include "SF32Paper.h"
 #include "SF32PaperRenderer.h"

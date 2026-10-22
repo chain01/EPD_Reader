@@ -8,11 +8,11 @@
 
 #include "UIRegionsManager.h"
 #include "reading_settings.h"
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
-#include "boards/sf32lb527/reader_ui.h"
+#ifdef READER_E0470A03
+#include "boards/reader/reader_ui.h"
 #endif
 
-#if defined(BSP_USING_TOUCHD) || defined(BSP_USING_BOARD_SF32LB527_OED_E0470A03)
+#if defined(BSP_USING_TOUCHD) || defined(READER_E0470A03)
     #include "drv_touch.h"
 #endif
 
@@ -50,11 +50,17 @@ rt_err_t SF32_TouchControls::tp_rx_indicate(rt_device_t dev, rt_size_t size)
     /*Read touch point data*/
     rt_device_read(dev, 0, &touch_data, 1);
 
+    // The 57 board's validated FT5446 reports native portrait coordinates.
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+    x = touch_data.x;
+    y = touch_data.y;
+#else
     //Rotate anti-clockwise 90 degree
     x = LCD_VER_RES_MAX - touch_data.y - 1;
     y = touch_data.x;
+#endif
 
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#ifdef READER_E0470A03
     if (x>=684 || y>=1216) return RT_EOK;
     if(x<instance->renderer->get_margin_left()||y<instance->renderer->get_margin_top())return RT_EOK;
     x-=instance->renderer->get_margin_left();y-=instance->renderer->get_margin_top();
@@ -125,7 +131,7 @@ rt_err_t SF32_TouchControls::tp_rx_indicate(rt_device_t dev, rt_size_t size)
 switch (ui_state)
 {
   case MAIN_PAGE:
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#ifdef READER_E0470A03
     for(int n=0;n<OPTION_COUNT;++n) {
         AreaRect &a=g_area_array[n];
         if(x>=a.start_x&&x<=a.end_x&&y>=a.start_y&&y<=a.end_y) {
@@ -134,15 +140,21 @@ switch (ui_state)
     }
     break;
   case FRONTLIGHT_PAGE:
-    for(int n=0;n<6;++n) {
+    for(int n=0;n<
+#ifdef BSP_USING_BOARD_SF32LB57GY_OED_E0470A03
+        7
+#else
+        6
+#endif
+        ;++n) {
         AreaRect &a=g_area_array[n];
-        if(x>=a.start_x&&x<=a.end_x&&y>=a.start_y&&y<=a.end_y){reader527_light_hit=n;action=SELECT;break;}
+        if(x>=a.start_x&&x<=a.end_x&&y>=a.start_y&&y<=a.end_y){reader_light_hit=n;action=SELECT;break;}
     }
     break;
   case USB_DFU_PAGE:
     for(int n=0;n<2;++n) {
         AreaRect &a=g_area_array[n];
-        if(x>=a.start_x&&x<=a.end_x&&y>=a.start_y&&y<=a.end_y){reader527_dfu_hit=n;action=SELECT;break;}
+        if(x>=a.start_x&&x<=a.end_x&&y>=a.start_y&&y<=a.end_y){reader_dfu_hit=n;action=SELECT;break;}
     }
     break;
 #else
@@ -349,7 +361,7 @@ switch (ui_state)
     }
     break;
   case SETTINGS_PAGE:
-#ifdef BSP_USING_BOARD_SF32LB527_OED_E0470A03
+#ifdef READER_E0470A03
     for(int n=SET_TIMEOUT;n<=SET_CONFIRM;++n)for(int part=0;part<3;++part) {
         AreaRect &a=g_area_array[n*3+part];
         if(a.end_x<=a.start_x||a.end_y<=a.start_y)continue;

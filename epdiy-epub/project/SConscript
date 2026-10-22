@@ -8,6 +8,10 @@ list = os.listdir(cwd)
 # Add SDK
 Import('SIFLI_SDK')
 objs.extend(SConscript(os.path.join(SIFLI_SDK, 'SConscript'), variant_dir="sifli_sdk", duplicate=0))
+if GetDepend('BSP_USING_BOARD_SF32LB57GY_OED_E0470A03'):
+    # Board-local SDMMC2 snapshot adds PA51 detection and idle clock gating.
+    objs = [node for node in GetCurrentEnv().Flatten(objs)
+            if os.path.basename(str(node)) not in ('drv_sdio.c','drv_sdio.o')]
 
 # Add LCPU Patch
 objs.extend(SConscript(os.path.join(SIFLI_SDK, 'example/rom_bin/lcpu_general_ble_img/SConscript'), variant_dir="lcpu_patch", duplicate=0))
