@@ -66,6 +66,8 @@ def main():
             'FACTORY SERIAL INSTALL PACKAGE for blank Flash or deliberate full recovery.\n'
             'Read FACTORY_FIRST_FLASH.md before use; do not use this package for routine updates.\n'
             'Run flash_factory.bat COMx. sftool_param.json and ImgBurnList.ini are included.\n'
+            'Recovery key: hold PA33 at boot. Hold the PA34 power key for 10 seconds to restart.\n'
+            'The recovery loader includes its own on-screen USB upgrade instructions.\n'
             'images.json records every firmware image length, address, CRC32 and SHA-256.\n'
             'After installation, use the protected USB updater for routine firmware updates.\n', encoding='utf-8')
         (args.output / 'flash_factory.bat').write_text(
@@ -108,7 +110,7 @@ def main():
         (args.output / 'README.txt').write_text(
             'SF32LB527 / E0470A03-AF-S, 684x1216 portrait\n'
             'Routine USB update package for a board that already has the protected recovery loader.\n'
-            'Enter USB upgrade from Settings, or hold the PA34 power key at boot.\n'
+            'Enter USB upgrade from Settings, or hold the PA33 recovery key at boot.\n'
             'Run: python usb_dfu_527.py --package <this-directory> --port <native-USB-COM-port>\n'
             'update.json permits only application, font and waveform images.\n'
             'The recovery protocol cannot write its own loader, bootloader or Flash table.\n'
